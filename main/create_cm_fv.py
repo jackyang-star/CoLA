@@ -7,8 +7,8 @@ from utils.create_cm_fv_utils import create_fv_list, create_api_cooccurrence_mat
 api_df = pd.read_json('../dataset/raw/programmableweb/apiData.json')
 mashup_df = pd.read_json('../dataset/raw/programmableweb/mashupData.json')
 features = np.load('../dataset/processed/comp_feature/entropy_c_features.npy').tolist()
-noname_features = np.load('../dataset/processed/comp_feature/noname_entropy_c_features.npy').tolist()
-noother_features = np.load('../dataset/processed/comp_feature/noother_entropy_c_features.npy').tolist()
+# noname_features = np.load('../dataset/processed/comp_feature/noname_entropy_c_features.npy').tolist()
+# noother_features = np.load('../dataset/processed/comp_feature/noother_entropy_c_features.npy').tolist()
 print('Loading File Finish')
 
 

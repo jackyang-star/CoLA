@@ -20,7 +20,7 @@ for feature in features_list:
     fv_list_array = np.load(f'../dataset/processed/cm_fv/{feature}_list.npy').tolist()
     fv_list_dict[feature] = fv_list_array  # 将特征列表添加到字典中
 # 读入各个特征的特征值的embedding
-with open("../dataset/processed/embeddings/gcn_embeddings.json", "r") as json_file:
+with open("../dataset/processed/embeddings/node_embeddings.json", "r") as json_file:
     loaded_embeddings_dict = json.load(json_file)
 # 读入最大特征值个数
 max_fv_len = np.loadtxt('../dataset/processed/cm_fv/max_fv_length.txt').astype(int)
@@ -65,7 +65,7 @@ for row, pos_cols in gt_list:
     train_len = int(len(pos_cols) * train_test_ratio)
     neg_cols = np.where(api_cm_array[row] == 0)[0]
     neg_length = len(neg_cols)
-    neg_cols = np.random.choice(neg_cols, int(neg_length * 0.5), replace=False)
+    neg_cols = np.random.choice(neg_cols, train_len, replace=False)
     # 构造正样本训练数据
     for pos in pos_cols[:train_len]:
         pos_emb = [item[1] for item in fv_list if item[0] == pos][0]

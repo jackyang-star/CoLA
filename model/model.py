@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+import dgl
 from dgl.nn.pytorch import SAGEConv
 from torch import nn
 import torch.nn.functional as F
@@ -68,9 +69,9 @@ class GraphSAGE(nn.Module):
 
     def forward(self, g, node_ids):
         h = self.embedding(node_ids)
-        h = self.conv1(g, h)
+        h = self.conv1(g, h, edge_weight=g.edata['weight'].float())  # 在计算中将权重转换为 float
         h = F.relu(h)
-        h = self.conv2(g, h)
+        h = self.conv2(g, h, edge_weight=g.edata['weight'].float())  # 同上
         return h
 
 
