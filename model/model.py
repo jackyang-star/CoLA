@@ -319,10 +319,11 @@ class EarlyStopping:
         self.best_score = None  # 最佳验证集性能
         self.early_stop = False  # 是否停止训练标志
 
-    def __call__(self, val_loss, model):
+    def __call__(self, val_loss):
         if self.best_score is None:
             self.best_score = val_loss
-            self.save_checkpoint(model)
+            # self.save_checkpoint(model1)
+            # self.save_checkpoint(model2)
         elif val_loss >= self.best_score + self.delta:
             self.counter += 1
             if self.verbose:
@@ -332,7 +333,8 @@ class EarlyStopping:
         else:
             self.best_score = val_loss
             self.counter = 0
-            self.save_checkpoint(model)
+            # self.save_checkpoint(model1)
+            # self.save_checkpoint(model2)
 
     def save_checkpoint(self, model):
         if self.verbose:
