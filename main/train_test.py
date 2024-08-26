@@ -1,7 +1,6 @@
-import logging
+import datetime
 import os
-import time
-
+import sys
 import numpy as np
 import pandas as pd
 import random
@@ -12,7 +11,7 @@ from torch import nn
 import scipy.sparse as sp
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
-from model.model2 import MVCG, EarlyStopping, MyDataset
+from model.model2 import MVCG, EarlyStopping, MyDataset, Predictor, TeeOutput
 from utils.create_cm_fv_utils import create_fv_list, create_api_cooccurrence_matrix, create_fv_cooccurrence_matrix
 
 
@@ -23,7 +22,7 @@ embedding_dim = 64
 train_test_ratio = 0.8
 # train & test parameters
 learning_rate = 0.001
-num_epochs = 130
+num_epochs = 1000
 topk = 10
 # model parameters
 dropout_rate = 0.1
@@ -143,18 +142,21 @@ def prepare_data(api_cm_array, api_list_array, api_df, features):
     return train_data, test_data, strategies
 
 
-def train(dataloader, model, optimizer, loss_fn, max_feature_length, graphs):
+def train(dataloader, model, predictor, optimizer, loss_fn, max_feature_length, graphs):
     model.train()
     epoch_loss = []
-    for query, candidate, label in dataloader:
+    for batch_query, batch_candidate, batch_label in dataloader:
         # cuda上运行
-        query = query.to(device)
-        candidate = candidate.to(device)
-        label = label.to(torch.float32).to(device)
+        batch_query = batch_query.to(device)
+        batch_candidate = batch_candidate.to(device)
+        batch_label = batch_label.to(torch.float32).to(device)
         # 计算complementary score
-        complementary_score = model(graphs, query, candidate, max_feature_length)
+        batch_query_embedding = model(graphs, batch_query, max_feature_length)
+        batch_candidate_embedding = model(graphs, batch_candidate, max_feature_length)
+        complementary_scores = predictor(batch_query_embedding, batch_candidate_embedding)
+        # complementary_scores = model(graphs, batch_query, batch_candidate, max_feature_length)
         # 计算损失
-        loss = loss_fn(complementary_score, label)
+        loss = loss_fn(complementary_scores, batch_label)
         # 反向传播和优化
         optimizer.zero_grad()
         loss.backward()
@@ -193,20 +195,28 @@ def ndcg(pred, truth):
     return ndcg
 
 
-def test(dataloader, model, graphs, feature_length, topk):
+def test(dataloader, model, predictor, graphs, max_feature_length, topk):
     model.eval()
     with torch.no_grad():
         recall_value = []
         mrr_value = []
         ndcg_value = []
+        item_embeddings = {}
+        for i in range(len(dataloader)):
+            index = torch.tensor(i).to(device)
+            item_embeddings[i] = model(graphs, index, max_feature_length)
+
         for query, candidates, truths in tqdm(dataloader):
-            query = torch.tensor(query, dtype=torch.int32).to(device)
+            # query = torch.tensor(query, dtype=torch.int32).to(device)
+            # candidates = torch.tensor(candidates, dtype=torch.int32).to(device)
             truths = torch.tensor(truths, dtype=torch.int32).to(device)
-            candidates = torch.tensor(candidates, dtype=torch.int32).to(device)
+            query_embedding = item_embeddings[query[0].item()]
             # 计算得分
             scores = []  # 保存candidate编号和score
             for candidate in candidates:
-                score = model(graphs, query, candidate, feature_length)
+                candidate_embedding = item_embeddings[candidate.item()]
+                score = predictor(query_embedding, candidate_embedding)
+                # score = model(graphs, query, candidate, max_feature_length)
                 scores.append((candidate, score))
             scores.sort(key=lambda x: x[1], reverse=True)
             topk_candidates = [x[0].item() for x in scores[:topk]]
@@ -221,88 +231,103 @@ def test(dataloader, model, graphs, feature_length, topk):
     return avg_recall, avg_mrr, avg_ndcg
 
 
-def create_logger(logger_file_path):
-    if not os.path.exists(logger_file_path):
-        os.makedirs(logger_file_path)
-    log_name = '{}.log'.format(time.strftime('%Y-%m-%d-%H-%M'))
-    final_log_file = os.path.join(logger_file_path, log_name)
+def log_to_file_with_terminal_output(log_dir=None):
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            # 获取当前时间并生成文件名
+            current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            log_filename = f"log_{current_time}.txt"
 
-    logger = logging.getLogger()  # 设定日志对象
-    logger.setLevel(logging.INFO)  # 设定日志等级
+            # 如果指定了log_dir，则将文件路径设置为log_dir，否则使用当前目录
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
+                log_filepath = os.path.join(log_dir, log_filename)
+            else:
+                log_filepath = log_filename
 
-    file_handler = logging.FileHandler(final_log_file)  # 文件输出
-    console_handler = logging.StreamHandler()  # 控制台输出
+            # 打开日志文件
+            with open(log_filepath, "w") as log_file:
+                # 创建TeeOutput对象，同时写入文件和终端
+                tee = TeeOutput(sys.stdout, log_file)
 
-    # 输出格式
-    formatter = logging.Formatter(
-        "%(asctime)s %(levelname)s: %(message)s "
-    )
+                # 替换sys.stdout
+                original_stdout = sys.stdout
+                sys.stdout = tee
 
-    file_handler.setFormatter(formatter)  # 设置文件输出格式
-    console_handler.setFormatter(formatter)  # 设施控制台输出格式
-    logger.addHandler(file_handler)
-    logger.addHandler(console_handler)
+                try:
+                    # 执行传入的函数
+                    func(*args, **kwargs)
+                finally:
+                    # 恢复sys.stdout
+                    sys.stdout = original_stdout
+                    print(f"Logs saved to {log_filepath}")
 
-    return logger
+        return wrapper
+    return decorator
 
 
-# 读入文件
-api_df = pd.read_json('../dataset/raw/programmableweb/apiData.json')
-mashup_df = pd.read_json('../dataset/raw/programmableweb/mashupData.json')
-features = np.load('../dataset/processed/comp_feature/entropy_c_features.npy').tolist()
-# noname_features = np.load('../dataset/processed/comp_feature/noname_entropy_c_features.npy').tolist()
-# noother_features = np.load('../dataset/processed/comp_feature/noother_entropy_c_features.npy').tolist()
+@log_to_file_with_terminal_output(log_dir="../log")
+def main():
+    # 读入文件
+    api_df = pd.read_json('../dataset/raw/programmableweb/apiData.json')
+    mashup_df = pd.read_json('../dataset/raw/programmableweb/mashupData.json')
+    features = np.load('../dataset/processed/comp_feature/entropy_c_features.npy').tolist()
+    # noname_features = np.load('../dataset/processed/comp_feature/noname_entropy_c_features.npy').tolist()
+    # noother_features = np.load('../dataset/processed/comp_feature/noother_entropy_c_features.npy').tolist()
 
-# 生成dgl图
-api_list_array, api_cm_array = create_api_cm(api_df, mashup_df)
-graphs, max_feature_length = create_graphs(features, api_df, api_list_array, api_cm_array)
+    # 生成dgl图
+    api_list_array, api_cm_array = create_api_cm(api_df, mashup_df)
+    graphs, max_feature_length = create_graphs(features, api_df, api_list_array, api_cm_array)
 
-# 准备数据
-train_data, test_data, strategies = prepare_data(api_cm_array, api_list_array, api_df, features)
-train_dataset = MyDataset(train_data)
-test_dataset = MyDataset(test_data)
-train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True)
-test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True)
+    # 准备数据
+    train_data, test_data, strategies = prepare_data(api_cm_array, api_list_array, api_df, features)
+    train_dataset = MyDataset(train_data)
+    test_dataset = MyDataset(test_data)
+    train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+    test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True)
 
-# 初始化模型
-node_nums = []
-for g in graphs:
-    node_nums.append(g.number_of_nodes())
-mvcg = MVCG(dropout_rate, embedding_dim, node_nums, strategies, device, combine_layer_num).to(device)
-# print(mvcg)
+    # 初始化模型
+    node_nums = []
+    for g in graphs:
+        node_nums.append(g.number_of_nodes())
+    predictor = Predictor(embedding_dim).to(device)
+    mvcg = MVCG(dropout_rate, embedding_dim, node_nums, strategies, device, combine_layer_num).to(device)
+    # print(mvcg)
 
-# 实例化
-optimizer = torch.optim.Adam(mvcg.parameters(), lr=learning_rate)
-scheduler = ReduceLROnPlateau(optimizer, mode=s_mode, factor=s_factor, patience=s_patience, verbose=s_verbose)
-early_stopping = EarlyStopping(es_patience, es_delta, es_verbose, path='../model/checkpoint.pt')
-loss_fn = nn.BCEWithLogitsLoss().to(device)  # 用于二分类的交叉熵损失
+    # 实例化
+    optimizer = torch.optim.Adam(list(mvcg.parameters()) + list(predictor.parameters()), lr=learning_rate)
+    scheduler = ReduceLROnPlateau(optimizer, mode=s_mode, factor=s_factor, patience=s_patience, verbose=s_verbose)
+    early_stopping = EarlyStopping(es_patience, es_delta, es_verbose, path='../model/checkpoint.pt')
+    loss_fn = nn.BCEWithLogitsLoss().to(device)  # 用于二分类的交叉熵损失
 
-# 训练&测试模型
-create_logger('../log')
-print(f'Running on {device}.')
-train_epochs_loss = []
-for epoch in range(num_epochs):
-    # 训练
-    epoch_loss = train(train_dataloader, mvcg, optimizer, loss_fn, max_feature_length, graphs)
-    avg_epoch_loss = np.average(epoch_loss)
-    print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {avg_epoch_loss}')
+    # 训练&测试模型
+    print(f'Running on {device}.')
+    for epoch in range(num_epochs):
+        # 训练
+        epoch_loss = train(train_dataloader, mvcg, predictor, optimizer, loss_fn, max_feature_length, graphs)
+        avg_epoch_loss = np.average(epoch_loss)
+        print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {avg_epoch_loss}')
 
-    if((epoch + 1) % 10 == 0):
-        # 测试
-        print(f"----------------------------------------------------------\nEpoch {epoch + 1}")
-        avg_recall, avg_mrr, avg_ndcg = test(test_dataloader, mvcg, graphs, max_feature_length, topk)
-        print(f'Epoch [{epoch + 1}/{num_epochs}], Recall: {avg_recall}')
-        print(f'Epoch [{epoch + 1}/{num_epochs}], MRR: {avg_mrr}')
-        print(f'Epoch [{epoch + 1}/{num_epochs}], NDCG: {avg_ndcg}')
+        if((epoch + 1) % 10 == 0):
+            # 测试
+            print(f"----------------------------------------------------------\nEpoch {epoch + 1}")
+            avg_recall, avg_mrr, avg_ndcg = test(test_dataloader, mvcg, predictor, graphs, max_feature_length, topk)
+            print(f'Epoch [{epoch + 1}/{num_epochs}], Recall: {avg_recall}')
+            print(f'Epoch [{epoch + 1}/{num_epochs}], MRR: {avg_mrr}')
+            print(f'Epoch [{epoch + 1}/{num_epochs}], NDCG: {avg_ndcg}')
 
-    # 调整学习率
-    scheduler.step(avg_epoch_loss)
+        # 调整学习率
+        scheduler.step(avg_epoch_loss)
 
-    # 早停
-    early_stopping(avg_epoch_loss)
-    if early_stopping.early_stop:
-        print("Early stopping")
-        break
+        # 早停
+        early_stopping(avg_epoch_loss)
+        if early_stopping.early_stop:
+            print("Early stopping")
+            break
+
+
+if __name__ == '__main__':
+    main()
 
 
 

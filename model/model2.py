@@ -121,7 +121,7 @@ class MVCG(nn.Module):
         self.gnn_model3 = GraphSAGE(embedding_dim)
         self.node_embedding3 = nn.Embedding(node_nums[3], embedding_dim)
         self.combiner = Combiner(embedding_dim, dropout_rate, combine_layer_num)
-        self.predictor_model = Predictor(embedding_dim)
+        # self.predictor_model = Predictor(embedding_dim)
 
     def padding_embeddings(self, batch_item, embeddings, feature_length):
         batch_item_embeddings = []
@@ -148,7 +148,7 @@ class MVCG(nn.Module):
         batch_item_embeddings = torch.stack(batch_item_embeddings).to(self.device)
         return batch_item_embeddings
 
-    def forward(self, graphs, batch_query, batch_candidate, max_feature_length):  # query和candidate是组合策略，是字典形式
+    def forward(self, graphs, batch_candidate, max_feature_length):  # query和candidate是组合策略，是字典形式
         # 生成node embeddings
         embeddings = []
         embeddings.append(self.gnn_model0(graphs[0], self.node_embedding0(torch.arange(self.node_nums[0]).to(self.device))))
@@ -156,26 +156,26 @@ class MVCG(nn.Module):
         embeddings.append(self.gnn_model2(graphs[2], self.node_embedding2(torch.arange(self.node_nums[2]).to(self.device))))
         embeddings.append(self.gnn_model3(graphs[3], self.node_embedding3(torch.arange(self.node_nums[3]).to(self.device))))
 
-        batch_query_strategy = []
+        # batch_query_strategy = []
         batch_candidate_strategy = []
-        for query in batch_query:
-            batch_query_strategy.append(self.strategies[query])
+        # for query in batch_query:
+        #     batch_query_strategy.append(self.strategies[query])
         if batch_candidate.dim() > 0:
             for candidate in batch_candidate:
                 batch_candidate_strategy.append(self.strategies[candidate])
         else:
             batch_candidate_strategy.append(self.strategies[batch_candidate])
         # 组合node embeddings
-        batch_query_embeddings = self.padding_embeddings(batch_query_strategy, embeddings, max_feature_length)
-        batch_combined_query_embedding = self.combiner(batch_query_embeddings)
+        # batch_query_embeddings = self.padding_embeddings(batch_query_strategy, embeddings, max_feature_length)
+        # batch_combined_query_embedding = self.combiner(batch_query_embeddings)
 
         batch_cand_embeddings = self.padding_embeddings(batch_candidate_strategy, embeddings, max_feature_length)
         batch_combined_cand_embedding = self.combiner(batch_cand_embeddings)
 
         # 计算互补得分
-        batch_complementary_score = self.predictor_model(batch_combined_query_embedding, batch_combined_cand_embedding)
+        # batch_complementary_score = self.predictor_model(batch_combined_query_embedding, batch_combined_cand_embedding)
 
-        return batch_complementary_score
+        return batch_combined_cand_embedding
 
 
 class MyDataset(Dataset):
@@ -227,18 +227,18 @@ class EarlyStopping:
         torch.save(model.state_dict(), self.path)
 
 
-class Logger(object):
-    def __init__(self, filename="output_log.txt"):
-        self.terminal = sys.stdout
-        self.log = open(filename, "w")
+class TeeOutput:
+    def __init__(self, *files):
+        self.files = files
 
-    def write(self, message):
-        self.terminal.write(message)
-        self.log.write(message)
+    def write(self, obj):
+        for f in self.files:
+            f.write(obj)
+            f.flush()  # 确保内容立即写入
 
     def flush(self):
-        self.terminal.flush()
-        self.log.flush()
+        for f in self.files:
+            f.flush()
 
 
 
