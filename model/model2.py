@@ -3,19 +3,24 @@ from torch import nn
 import torch.nn.functional as F
 from dgl.nn.pytorch import SAGEConv
 from torch.utils.data import Dataset
-import sys
 
 
 class GraphSAGE(nn.Module):
-    def __init__(self, embedding_dim):
+    def __init__(self, embedding_dim, gcn_layer_num):
         super(GraphSAGE, self).__init__()
-        self.conv1 = SAGEConv(embedding_dim, embedding_dim, aggregator_type='mean')
-        self.conv2 = SAGEConv(embedding_dim, embedding_dim, aggregator_type='mean')
+        self.layers = nn.ModuleList()
+        # 创建多个图卷积层
+        for _ in range(gcn_layer_num):
+            self.layers.append(SAGEConv(embedding_dim, embedding_dim, aggregator_type='mean'))
 
     def forward(self, g, inputs):
-        h = self.conv1(g, inputs, edge_weight=g.edata['weight'])  # 在计算中将权重转换为 float
-        h = F.relu(h)
-        h = self.conv2(g, h, edge_weight=g.edata['weight'])  # 同上
+        h = inputs
+        # 遍历所有层
+        for i, layer in enumerate(self.layers):
+            h = layer(g, h, edge_weight=g.edata['weight'])
+            # 如果不是最后一层，应用ReLU
+            if i < len(self.layers) - 1:
+                h = F.relu(h)
         return h
 
 
@@ -106,19 +111,20 @@ class Predictor(nn.Module):
 
 
 class MVCG(nn.Module):
-    def __init__(self, dropout_rate, embedding_dim, node_nums, strategies, device, combine_layer_num):
+    def __init__(self, dropout_rate, embedding_dim, node_nums, strategies, device, combine_layer_num, gcn_layer_num):
         super(MVCG, self).__init__()
         self.device = device
         self.strategies = strategies
         self.node_nums = node_nums
+        self.embedding_dim = embedding_dim
 
-        self.gnn_model0 = GraphSAGE(embedding_dim)
+        self.gnn_model0 = GraphSAGE(embedding_dim, gcn_layer_num)
         self.node_embedding0 = nn.Embedding(node_nums[0], embedding_dim)
-        self.gnn_model1 = GraphSAGE(embedding_dim)
+        self.gnn_model1 = GraphSAGE(embedding_dim, gcn_layer_num)
         self.node_embedding1 = nn.Embedding(node_nums[1], embedding_dim)
-        self.gnn_model2 = GraphSAGE(embedding_dim)
+        self.gnn_model2 = GraphSAGE(embedding_dim, gcn_layer_num)
         self.node_embedding2 = nn.Embedding(node_nums[2], embedding_dim)
-        self.gnn_model3 = GraphSAGE(embedding_dim)
+        self.gnn_model3 = GraphSAGE(embedding_dim, gcn_layer_num)
         self.node_embedding3 = nn.Embedding(node_nums[3], embedding_dim)
         self.combiner = Combiner(embedding_dim, dropout_rate, combine_layer_num)
         # self.predictor_model = Predictor(embedding_dim)
@@ -142,7 +148,7 @@ class MVCG(nn.Module):
             # 在 graph 维度进行padding
             for i in range(graph_num):
                 if item_embeddings[i] is None:
-                    item_embeddings[i] = torch.zeros(feature_length, 64).to(self.device)  # 如果某个图没有嵌入，填充全零张量
+                    item_embeddings[i] = torch.zeros(feature_length, self.embedding_dim).to(self.device)  # 如果某个图没有嵌入，填充全零张量
             item_embeddings = torch.stack(item_embeddings)
             batch_item_embeddings.append(item_embeddings)
         batch_item_embeddings = torch.stack(batch_item_embeddings).to(self.device)

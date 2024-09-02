@@ -20,13 +20,15 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # data parameters
 embedding_dim = 64
 train_test_ratio = 0.8
-# train & test parameters
-learning_rate = 0.001
-num_epochs = 1000
-topk = 10
 # model parameters
-dropout_rate = 0.1
+dropout_rate = 0.2
 combine_layer_num = 1
+gcn_layer_num = 2
+# train & test parameters
+batch_size = 64
+learning_rate = 0.001
+num_epochs = 100
+topk = 10
 # early_stopping parameters
 es_patience = 20
 es_delta = 0
@@ -283,7 +285,7 @@ def main():
     train_data, test_data, strategies = prepare_data(api_cm_array, api_list_array, api_df, features)
     train_dataset = MyDataset(train_data)
     test_dataset = MyDataset(test_data)
-    train_dataloader = DataLoader(train_dataset, batch_size=64, shuffle=True)
+    train_dataloader = DataLoader(train_dataset, batch_size, shuffle=True)
     test_dataloader = DataLoader(test_dataset, batch_size=1, shuffle=True)
 
     # 初始化模型
@@ -291,7 +293,7 @@ def main():
     for g in graphs:
         node_nums.append(g.number_of_nodes())
     predictor = Predictor(embedding_dim).to(device)
-    mvcg = MVCG(dropout_rate, embedding_dim, node_nums, strategies, device, combine_layer_num).to(device)
+    mvcg = MVCG(dropout_rate, embedding_dim, node_nums, strategies, device, combine_layer_num, gcn_layer_num).to(device)
     # print(mvcg)
 
     # 实例化
@@ -301,6 +303,14 @@ def main():
     loss_fn = nn.BCEWithLogitsLoss().to(device)  # 用于二分类的交叉熵损失
 
     # 训练&测试模型
+    maxRecall = 0.0
+    maxMRR = 0.0
+    maxNDCG = 0.0
+    print(f'embedding_dim = {embedding_dim}')
+    print(f'dropout_rate = {dropout_rate}')
+    print(f'combine_layer_num = {combine_layer_num}')
+    print(f'gcn_layer_num = {gcn_layer_num}')
+    print(f'batch_size = {batch_size}\n')
     print(f'Running on {device}.')
     for epoch in range(num_epochs):
         # 训练
@@ -308,13 +318,20 @@ def main():
         avg_epoch_loss = np.average(epoch_loss)
         print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {avg_epoch_loss}')
 
-        if((epoch + 1) % 10 == 0):
+        if((epoch + 1) % 1 == 0):
             # 测试
-            print(f"----------------------------------------------------------\nEpoch {epoch + 1}")
+            print(f"Test {epoch + 1}")
             avg_recall, avg_mrr, avg_ndcg = test(test_dataloader, mvcg, predictor, graphs, max_feature_length, topk)
+            if(avg_recall > maxRecall):
+                maxRecall = avg_recall
+            if(avg_mrr > maxMRR):
+                maxMRR = avg_mrr
+            if(avg_ndcg > maxNDCG):
+                maxNDCG = avg_ndcg
             print(f'Epoch [{epoch + 1}/{num_epochs}], Recall: {avg_recall}')
             print(f'Epoch [{epoch + 1}/{num_epochs}], MRR: {avg_mrr}')
             print(f'Epoch [{epoch + 1}/{num_epochs}], NDCG: {avg_ndcg}')
+            print(f"----------------------------------------------------------\n")
 
         # 调整学习率
         scheduler.step(avg_epoch_loss)
@@ -324,6 +341,10 @@ def main():
         if early_stopping.early_stop:
             print("Early stopping")
             break
+
+    print(f'Max Recall: {maxRecall}')
+    print(f'Max MRR: {maxMRR}')
+    print(f'Max NDCG: {maxNDCG}')
 
 
 if __name__ == '__main__':
