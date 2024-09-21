@@ -44,10 +44,10 @@ class SelfAttention(nn.Module):
 
 
 class CombinerLayer(nn.Module):
-    def __init__(self, embedding_dim, dropout_rate):
+    def __init__(self, embedding_dim):
         super(CombinerLayer, self).__init__()
         self.self_attention = SelfAttention(embedding_dim)
-        self.attention_dropout = nn.Dropout(dropout_rate)
+        # self.attention_dropout = nn.Dropout(dropout_rate)
 
     def forward(self, embeddings):
         # layer normalization
@@ -72,10 +72,10 @@ class CombinerLayer(nn.Module):
 
 
 class Combiner(nn.Module):
-    def __init__(self, embedding_dim, dropout_rate, combine_layer_num):
+    def __init__(self, embedding_dim, combiner_layer_num):
         super(Combiner, self).__init__()
-        layers1 = [CombinerLayer(embedding_dim, dropout_rate) for _ in range(combine_layer_num)]
-        layers2 = [CombinerLayer(embedding_dim, dropout_rate) for _ in range(combine_layer_num)]
+        layers1 = [CombinerLayer(embedding_dim) for _ in range(combiner_layer_num)]
+        layers2 = [CombinerLayer(embedding_dim) for _ in range(combiner_layer_num)]
         self.layers1 = nn.ModuleList(layers1)
         self.layers2 = nn.ModuleList(layers2)
 
@@ -111,7 +111,7 @@ class Predictor(nn.Module):
 
 
 class MVCG(nn.Module):
-    def __init__(self, dropout_rate, embedding_dim, node_nums, strategies, device, combine_layer_num, gcn_layer_num):
+    def __init__(self, node_nums, strategies, device, embedding_dim, combiner_layer_num, gcn_layer_num):
         super(MVCG, self).__init__()
         self.device = device
         self.strategies = strategies
@@ -126,7 +126,7 @@ class MVCG(nn.Module):
         self.node_embedding2 = nn.Embedding(node_nums[2], embedding_dim)
         self.gnn_model3 = GraphSAGE(embedding_dim, gcn_layer_num)
         self.node_embedding3 = nn.Embedding(node_nums[3], embedding_dim)
-        self.combiner = Combiner(embedding_dim, dropout_rate, combine_layer_num)
+        self.combiner = Combiner(embedding_dim, combiner_layer_num)
         # self.predictor_model = Predictor(embedding_dim)
 
     def padding_embeddings(self, batch_item, embeddings, feature_length):

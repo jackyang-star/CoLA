@@ -18,17 +18,16 @@ from utils.create_cm_fv_utils import create_fv_list, create_api_cooccurrence_mat
 # parameters
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # data parameters
-embedding_dim = 64
 train_test_ratio = 0.8
 # model parameters
-dropout_rate = 0.2
-combine_layer_num = 1
+embedding_dim = 256
+combiner_layer_num = 1
 gcn_layer_num = 2
 # train & test parameters
 batch_size = 64
 learning_rate = 0.001
 num_epochs = 100
-topk = 10
+topk_list = [5, 10, 20, 30, 40, 50]
 # early_stopping parameters
 es_patience = 20
 es_delta = 0
@@ -197,9 +196,12 @@ def ndcg(pred, truth):
     return ndcg
 
 
-def test(dataloader, model, predictor, graphs, max_feature_length, topk):
+def test(dataloader, model, predictor, graphs, max_feature_length, topk_list):
     model.eval()
     with torch.no_grad():
+        recall_values = {k: [] for k in topk_list}
+        mrr_values = {k: [] for k in topk_list}
+        ndcg_values = {k: [] for k in topk_list}
         recall_value = []
         mrr_value = []
         ndcg_value = []
@@ -221,16 +223,18 @@ def test(dataloader, model, predictor, graphs, max_feature_length, topk):
                 # score = model(graphs, query, candidate, max_feature_length)
                 scores.append((candidate, score))
             scores.sort(key=lambda x: x[1], reverse=True)
-            topk_candidates = [x[0].item() for x in scores[:topk]]
-            # 计算指标
-            truths = truths.tolist()
-            recall_value.append(recall(topk_candidates, truths))
-            mrr_value.append(mrr(topk_candidates, truths))
-            ndcg_value.append(ndcg(topk_candidates, truths))
-        avg_recall = sum(recall_value) / len(recall_value)
-        avg_mrr = sum(mrr_value) / len(mrr_value)
-        avg_ndcg = sum(ndcg_value) / len(ndcg_value)
-    return avg_recall, avg_mrr, avg_ndcg
+
+            for topk in topk_list:
+                topk_candidates = [x[0].item() for x in scores[:topk]]
+                # 计算指标
+                truths_list = truths.tolist()
+                recall_values[topk].append(recall(topk_candidates, truths_list))
+                mrr_values[topk].append(mrr(topk_candidates, truths_list))
+                ndcg_values[topk].append(ndcg(topk_candidates, truths_list))
+        avg_recalls = {k: sum(recall_values[k]) / len(recall_values[k]) for k in topk_list}
+        avg_mrrs = {k: sum(mrr_values[k]) / len(mrr_values[k]) for k in topk_list}
+        avg_ndcgs = {k: sum(ndcg_values[k]) / len(ndcg_values[k]) for k in topk_list}
+    return avg_recalls, avg_mrrs, avg_ndcgs
 
 
 def log_to_file_with_terminal_output(log_dir=None):
@@ -270,6 +274,14 @@ def log_to_file_with_terminal_output(log_dir=None):
 
 @log_to_file_with_terminal_output(log_dir="../log")
 def main():
+    seed = 123  # 可以是任何数字，保持一致即可
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)  # 如果使用GPU
+    torch.backends.cudnn.deterministic = True
+
     # 读入文件
     api_df = pd.read_json('../dataset/raw/programmableweb/apiData.json')
     mashup_df = pd.read_json('../dataset/raw/programmableweb/mashupData.json')
@@ -293,7 +305,7 @@ def main():
     for g in graphs:
         node_nums.append(g.number_of_nodes())
     predictor = Predictor(embedding_dim).to(device)
-    mvcg = MVCG(dropout_rate, embedding_dim, node_nums, strategies, device, combine_layer_num, gcn_layer_num).to(device)
+    mvcg = MVCG(node_nums, strategies, device, embedding_dim, combiner_layer_num, gcn_layer_num).to(device)
     # print(mvcg)
 
     # 实例化
@@ -303,15 +315,15 @@ def main():
     loss_fn = nn.BCEWithLogitsLoss().to(device)  # 用于二分类的交叉熵损失
 
     # 训练&测试模型
-    maxRecall = 0.0
-    maxMRR = 0.0
-    maxNDCG = 0.0
+    maxRecall = {k: 0.0 for k in topk_list}
+    maxMRR = {k: 0.0 for k in topk_list}
+    maxNDCG = {k: 0.0 for k in topk_list}
     print(f'embedding_dim = {embedding_dim}')
-    print(f'dropout_rate = {dropout_rate}')
-    print(f'combine_layer_num = {combine_layer_num}')
+    print(f'combiner_layer_num = {combiner_layer_num}')
     print(f'gcn_layer_num = {gcn_layer_num}')
-    print(f'batch_size = {batch_size}\n')
-    print(f'Running on {device}.')
+    print(f'batch_size = {batch_size}')
+    print(f'learning_rate = {learning_rate}')
+    print(f'Running on {device}\n')
     for epoch in range(num_epochs):
         # 训练
         epoch_loss = train(train_dataloader, mvcg, predictor, optimizer, loss_fn, max_feature_length, graphs)
@@ -321,16 +333,17 @@ def main():
         if((epoch + 1) % 1 == 0):
             # 测试
             print(f"Test {epoch + 1}")
-            avg_recall, avg_mrr, avg_ndcg = test(test_dataloader, mvcg, predictor, graphs, max_feature_length, topk)
-            if(avg_recall > maxRecall):
-                maxRecall = avg_recall
-            if(avg_mrr > maxMRR):
-                maxMRR = avg_mrr
-            if(avg_ndcg > maxNDCG):
-                maxNDCG = avg_ndcg
-            print(f'Epoch [{epoch + 1}/{num_epochs}], Recall: {avg_recall}')
-            print(f'Epoch [{epoch + 1}/{num_epochs}], MRR: {avg_mrr}')
-            print(f'Epoch [{epoch + 1}/{num_epochs}], NDCG: {avg_ndcg}')
+            avg_recalls, avg_mrrs, avg_ndcgs = test(test_dataloader, mvcg, predictor, graphs, max_feature_length, topk_list)
+            for topk in topk_list:
+                if avg_recalls[topk] > maxRecall[topk]:
+                    maxRecall[topk] = avg_recalls[topk]
+                if avg_mrrs[topk] > maxMRR[topk]:
+                    maxMRR[topk] = avg_mrrs[topk]
+                if avg_ndcgs[topk] > maxNDCG[topk]:
+                    maxNDCG[topk] = avg_ndcgs[topk]
+                print(f'Epoch [{epoch + 1}/{num_epochs}], Recall@{topk}: {avg_recalls[topk]}')
+                print(f'Epoch [{epoch + 1}/{num_epochs}], MRR@{topk}: {avg_mrrs[topk]}')
+                print(f'Epoch [{epoch + 1}/{num_epochs}], NDCG@{topk}: {avg_ndcgs[topk]}')
             print(f"----------------------------------------------------------\n")
 
         # 调整学习率
