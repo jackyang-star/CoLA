@@ -126,7 +126,19 @@ class MVCG(nn.Module):
         self.node_embedding2 = nn.Embedding(node_nums[2], embedding_dim)
         self.gnn_model3 = GraphSAGE(embedding_dim, gcn_layer_num)
         self.node_embedding3 = nn.Embedding(node_nums[3], embedding_dim)
-        self.combiner = Combiner(embedding_dim, combiner_layer_num)
+        # self.gnn_model4 = GraphSAGE(embedding_dim, gcn_layer_num)
+        # self.node_embedding4 = nn.Embedding(node_nums[3], embedding_dim)
+        # self.gnn_model5 = GraphSAGE(embedding_dim, gcn_layer_num)
+        # self.node_embedding5 = nn.Embedding(node_nums[3], embedding_dim)
+        # self.gnn_model6 = GraphSAGE(embedding_dim, gcn_layer_num)
+        # self.node_embedding6 = nn.Embedding(node_nums[3], embedding_dim)
+        # self.gnn_model7 = GraphSAGE(embedding_dim, gcn_layer_num)
+        # self.node_embedding7 = nn.Embedding(node_nums[3], embedding_dim)
+        # self.gnn_model8 = GraphSAGE(embedding_dim, gcn_layer_num)
+        # self.node_embedding8 = nn.Embedding(node_nums[3], embedding_dim)
+        # self.gnn_model9 = GraphSAGE(embedding_dim, gcn_layer_num)
+        # self.node_embedding9 = nn.Embedding(node_nums[3], embedding_dim)
+        # self.combiner = Combiner(embedding_dim, combiner_layer_num)
         # self.predictor_model = Predictor(embedding_dim)
 
     def padding_embeddings(self, batch_item, embeddings, feature_length):
@@ -161,6 +173,12 @@ class MVCG(nn.Module):
         embeddings.append(self.gnn_model1(graphs[1], self.node_embedding1(torch.arange(self.node_nums[1]).to(self.device))))
         embeddings.append(self.gnn_model2(graphs[2], self.node_embedding2(torch.arange(self.node_nums[2]).to(self.device))))
         embeddings.append(self.gnn_model3(graphs[3], self.node_embedding3(torch.arange(self.node_nums[3]).to(self.device))))
+        # embeddings.append(self.gnn_model4(graphs[4], self.node_embedding4(torch.arange(self.node_nums[4]).to(self.device))))
+        # embeddings.append(self.gnn_model5(graphs[5], self.node_embedding5(torch.arange(self.node_nums[5]).to(self.device))))
+        # embeddings.append(self.gnn_model6(graphs[6], self.node_embedding6(torch.arange(self.node_nums[6]).to(self.device))))
+        # embeddings.append(self.gnn_model7(graphs[7], self.node_embedding7(torch.arange(self.node_nums[7]).to(self.device))))
+        # embeddings.append(self.gnn_model8(graphs[8], self.node_embedding8(torch.arange(self.node_nums[8]).to(self.device))))
+        # embeddings.append(self.gnn_model9(graphs[9], self.node_embedding9(torch.arange(self.node_nums[9]).to(self.device))))
 
         # batch_query_strategy = []
         batch_candidate_strategy = []

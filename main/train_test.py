@@ -286,8 +286,7 @@ def main():
     api_df = pd.read_json('../dataset/raw/programmableweb/apiData.json')
     mashup_df = pd.read_json('../dataset/raw/programmableweb/mashupData.json')
     features = np.load('../dataset/processed/comp_feature/entropy_c_features.npy').tolist()
-    # noname_features = np.load('../dataset/processed/comp_feature/noname_entropy_c_features.npy').tolist()
-    # noother_features = np.load('../dataset/processed/comp_feature/noother_entropy_c_features.npy').tolist()
+    # all_features = np.load('../dataset/processed/comp_feature/all_entropy_c_features.npy').tolist()
 
     # 生成dgl图
     api_list_array, api_cm_array = create_api_cm(api_df, mashup_df)
