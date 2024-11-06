@@ -4,9 +4,9 @@ from utils.find_comp_feature_utils import find
 
 
 # 参数
-features = ['Name', 'Primary Category', 'Secondary Categories', 'API Provider', 'Authentication model', 'Version status',
-            'Type', 'Scope', 'Architectural Style', 'Supported Request Formats', 'Supported Response Formats']
-entropy_threshold = 1
+features = ['Name', 'Primary Category', 'Secondary Categories', 'API Provider', 'Version status', 'Type', 'Scope',
+            'Architectural Style', 'Supported Request Formats', 'Supported Response Formats']
+entropy_threshold = [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.4]
 gini_threshold = 0.4
 
 
@@ -17,21 +17,23 @@ print('Loading File Finish')
 
 
 # 求出互补特征
-entropy_c_features, gini_c_features = find(api_df, mashup_df, features, entropy_threshold, gini_threshold)
+# entropy_c_features, gini_c_features = find(api_df, mashup_df, features, entropy_threshold, gini_threshold)
+entropy_c_features = find(api_df, mashup_df, features, entropy_threshold, gini_threshold)
 # 保存互补特征
-# 保存为csv文件
-e_df = pd.DataFrame(entropy_c_features)
-g_df = pd.DataFrame(gini_c_features)
-e_df.to_csv('../dataset/processed/comp_feature/entropy_c_features.csv', index=False)
-g_df.to_csv('../dataset/processed/comp_feature/gini_c_features.csv', index=False)
-# 保存为npy文件
-e_array = np.array(entropy_c_features)
-g_array = np.array(gini_c_features)
-np.save('../dataset/processed/comp_feature/entropy_c_features.npy', e_array)
-np.save('../dataset/processed/comp_feature/gini_c_features.npy', g_array)
-# 打印互补特征
-print(f'entropy_c_features: {entropy_c_features}')
-print(f'gini_c_features: {gini_c_features}')
+for c_feature, threshold in zip(entropy_c_features, entropy_threshold):
+    # 保存为csv文件
+    e_df = pd.DataFrame(c_feature)
+    # g_df = pd.DataFrame(gini_c_features)
+    e_df.to_csv(f'../dataset/processed/comp_feature/{threshold}_features.csv', index=False)
+    # g_df.to_csv('../dataset/processed/comp_feature/gini_c_features.csv', index=False)
+    # 保存为npy文件
+    e_array = np.array(c_feature)
+    # g_array = np.array(gini_c_features)
+    np.save(f'../dataset/processed/comp_feature/{threshold}_features.npy', e_array)
+    # np.save('../dataset/processed/comp_feature/gini_c_features.npy', g_array)
+    # 打印互补特征
+    print(f'entropy_c_features: {entropy_c_features}')
+    # print(f'gini_c_features: {gini_c_features}')
 
 
 

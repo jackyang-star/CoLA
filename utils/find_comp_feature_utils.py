@@ -9,19 +9,19 @@ def entropy(series):
     return -(p * np.log2(p + 1e-10)).sum()
 
 # 定义计算Gini的函数
-def gini(series):
-    if series.empty:
-        p = 1
-    else:
-        p = series.value_counts(normalize=True)
-    return 1 - np.sum(p ** 2)
+# def gini(series):
+#     if series.empty:
+#         p = 1
+#     else:
+#         p = series.value_counts(normalize=True)
+#     return 1 - np.sum(p ** 2)
 
 
 def find(api_df, mashup_df, m_features, entropy_threshold, gini_threshold):
     ma_entropy = {}
-    ma_gini = {}
+    # ma_gini = {}
     feature_entropies = {}
-    feature_ginies = {}
+    # feature_ginies = {}
 
     # 遍历mashup
     for _, mashup in mashup_df.iterrows():
@@ -45,24 +45,27 @@ def find(api_df, mashup_df, m_features, entropy_threshold, gini_threshold):
                                     if (matching1_fv_set, matching2_fv_set) not in fv_pair:  # 防止重复添加
                                         fv_pair.append((matching1_fv_set, matching2_fv_set))
                 feature_values_entropy = entropy(pd.Series(fv_pair))
-                feature_values_gini = gini(pd.Series(fv_pair))
+                # feature_values_gini = gini(pd.Series(fv_pair))
                 ma_entropy[(mashup['Name'], feature)] = feature_values_entropy
-                ma_gini[(mashup['Name'], feature)] = feature_values_gini
+                # ma_gini[(mashup['Name'], feature)] = feature_values_gini
 
     # 取每个feature在所有mashup上的entropy，求平均值作为该feature的entropy
     for feature in m_features:
         # if feature in api_df.columns:
         feature_entropies[feature] = np.mean([ma_entropy[(mashup_id, feature)] for mashup_id, f in ma_entropy.keys() if f == feature])
-        feature_ginies[feature] = np.mean([ma_gini[(mashup_id, feature)] for mashup_id, f in ma_gini.keys() if f == feature])
-        print(f'Feature: {feature}\nEntropy: {feature_entropies[feature]}\tGini: {feature_ginies[feature]}')
+        # feature_ginies[feature] = np.mean([ma_gini[(mashup_id, feature)] for mashup_id, f in ma_gini.keys() if f == feature])
+        print(f'Feature: {feature}\nEntropy: {feature_entropies[feature]}')
 
     # 判断特征的互补性
-    entropy_complementary_features = [feature for feature, entropy_value in feature_entropies.items() if
-                                      entropy_value > entropy_threshold]
-    gini_complementary_features = [feature for feature, gini_value in feature_ginies.items() if
-                                      gini_value > gini_threshold]
+    c_features = []
+    for threshold in entropy_threshold:
+        entropy_complementary_features = [feature for feature, entropy_value in feature_entropies.items() if
+                                          entropy_value > threshold]
+        c_features.append(entropy_complementary_features)
+    # gini_complementary_features = [feature for feature, gini_value in feature_ginies.items() if
+    #                                   gini_value > gini_threshold]
 
-    return entropy_complementary_features, gini_complementary_features
+    return c_features
 
 
 
