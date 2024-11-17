@@ -11,7 +11,8 @@ from torch import nn
 import scipy.sparse as sp
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
-from model.model2 import MVCG, EarlyStopping, MyDataset, Predictor, TeeOutput
+
+from model.hw.model_hw import MVCG, EarlyStopping, MyDataset, Predictor, TeeOutput
 from utils.create_cm_fv_utils import create_fv_list, create_api_cooccurrence_matrix, create_fv_cooccurrence_matrix
 
 
@@ -20,11 +21,11 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 # data parameters
 train_test_ratio = 0.8
 # model parameters
-embedding_dim = 256
-combiner_layer_num = 1
+embedding_dim = 32
+combiner_layer_num = 3
 gcn_layer_num = 2
 # train & test parameters
-batch_size = 64
+batch_size = 128
 learning_rate = 0.001
 num_epochs = 100
 topk_list = [5, 10, 20, 30, 40, 50]
@@ -40,10 +41,10 @@ s_mode = 'min'
 
 
 # 构建API的共现矩阵
-def create_api_cm(api_df, mashup_df):
+def create_api_cm(api_df, app_df):
     # 获取API的列表和共现矩阵
-    api_list = sorted(api_df['Name'].to_list())
-    api_cm_array = create_api_cooccurrence_matrix(mashup_df, api_list, 'Related APIs')
+    api_list = sorted(api_df['name'].to_list())
+    api_cm_array = create_api_cooccurrence_matrix(app_df, api_list, 'relatedAPIs')
     # 删除没有共现关系的API
     non_zero_rows = np.any(api_cm_array != 0, axis=1)
     non_zero_cols = np.any(api_cm_array != 0, axis=0)
@@ -272,7 +273,7 @@ def log_to_file_with_terminal_output(log_dir=None):
     return decorator
 
 
-@log_to_file_with_terminal_output(log_dir="../log")
+@log_to_file_with_terminal_output(log_dir="../../log/hw")
 def main():
     seed = 123  # 可以是任何数字，保持一致即可
     random.seed(seed)
@@ -283,17 +284,18 @@ def main():
     torch.backends.cudnn.deterministic = True
 
     # 读入文件
-    api_df = pd.read_json('../dataset/raw/programmableweb/apiData.json')
-    mashup_df = pd.read_json('../dataset/raw/programmableweb/mashupData.json')
-    features = np.load('../dataset/processed/comp_feature/entropy_c_features.npy').tolist()
-    # all_features = np.load('../dataset/processed/comp_feature/all_entropy_c_features.npy').tolist()
+    api_df = pd.read_json('../../dataset/raw/HuaWei/api.json')
+    app_df = pd.read_json('../../dataset/raw/HuaWei/app.json')
+    features_2 = np.load('../../dataset/processed/hw/comp_feature/comp_features.npy').tolist()
+    features_no_name = [x for x in features_2 if x != "name"]
+    features_no_category = [x for x in features_2 if x != "category"]
 
     # 生成dgl图
-    api_list_array, api_cm_array = create_api_cm(api_df, mashup_df)
-    graphs, max_feature_length = create_graphs(features, api_df, api_list_array, api_cm_array)
+    api_list_array, api_cm_array = create_api_cm(api_df, app_df)
+    graphs, max_feature_length = create_graphs(features_2, api_df, api_list_array, api_cm_array)
 
     # 准备数据
-    train_data, test_data, strategies = prepare_data(api_cm_array, api_list_array, api_df, features)
+    train_data, test_data, strategies = prepare_data(api_cm_array, api_list_array, api_df, features_2)
     train_dataset = MyDataset(train_data)
     test_dataset = MyDataset(test_data)
     train_dataloader = DataLoader(train_dataset, batch_size, shuffle=True)
@@ -329,7 +331,7 @@ def main():
         avg_epoch_loss = np.average(epoch_loss)
         print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {avg_epoch_loss}')
 
-        if((epoch + 1) % 1 == 0):
+        if((epoch + 1) % 5 == 0):
             # 测试
             print(f"Test {epoch + 1}")
             avg_recalls, avg_mrrs, avg_ndcgs = test(test_dataloader, mvcg, predictor, graphs, max_feature_length, topk_list)

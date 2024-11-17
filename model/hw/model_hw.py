@@ -1,8 +1,9 @@
 import torch
 from torch import nn
-import torch.nn.functional as F
-from dgl.nn.pytorch import SAGEConv
 from torch.utils.data import Dataset
+import torch.nn.functional as F
+import dgl
+from dgl.nn.pytorch import SAGEConv, GraphConv, GATConv
 
 
 class GraphSAGE(nn.Module):
@@ -19,6 +20,43 @@ class GraphSAGE(nn.Module):
         for i, layer in enumerate(self.layers):
             h = layer(g, h, edge_weight=g.edata['weight'])
             # 如果不是最后一层，应用ReLU
+            if i < len(self.layers) - 1:
+                h = F.relu(h)
+        return h
+
+
+class GCN(nn.Module):
+    def __init__(self, embedding_dim, gcn_layer_num):
+        super(GCN, self).__init__()
+        self.layers = nn.ModuleList()
+        for _ in range(gcn_layer_num):
+            self.layers.append(GraphConv(embedding_dim, embedding_dim))
+
+    def forward(self, g, inputs):
+        # address the 0-in-degree node
+        g = dgl.add_self_loop(g)
+
+        h = inputs
+        for i, layer in enumerate(self.layers):
+            h = layer(g, h)
+            if i < len(self.layers) - 1:
+                h = F.relu(h)
+        return h
+
+
+class GAT(nn.Module):
+    def __init__(self, embedding_dim, gcn_layer_num):
+        super(GAT, self).__init__()
+        self.layers = nn.ModuleList()
+        for _ in range(gcn_layer_num):
+            self.layers.append(GATConv(embedding_dim, embedding_dim, 8))
+
+    def forward(self, g, inputs):
+        g = dgl.add_self_loop(g)
+
+        h = inputs
+        for i, layer in enumerate(self.layers):
+            h = layer(g, h, edge_weight=g.edata['weight'])
             if i < len(self.layers) - 1:
                 h = F.relu(h)
         return h
@@ -82,13 +120,21 @@ class Combiner(nn.Module):
     def forward(self, embeddings):
         output0 = embeddings
 
+        # # attention method
         for layer in self.layers1:
             output0 = layer(output0)
+        # # sum method
         output1 = output0.sum(dim=-2)
+        # # flatten method
+        # flattened_output1 = output0.view(output0.size(0), output0.size(1), -1)
 
+        # attention method
         for layer in self.layers2:
             output1 = layer(output1)
+        # sum method
         output2 = output1.sum(dim=-2)
+        # # flatten method
+        # flattened_output2 = flattened_output1.view(flattened_output1.size(0), flattened_output1.size(1), -1)
 
         return output2
 
@@ -118,27 +164,15 @@ class MVCG(nn.Module):
         self.node_nums = node_nums
         self.embedding_dim = embedding_dim
 
-        self.gnn_model0 = GraphSAGE(embedding_dim, gcn_layer_num)
+        self.graphsage_model0 = GraphSAGE(embedding_dim, gcn_layer_num)
+        self.gcn_model0 = GCN(embedding_dim, gcn_layer_num)
+        self.gat_model0 = GAT(embedding_dim, gcn_layer_num)
         self.node_embedding0 = nn.Embedding(node_nums[0], embedding_dim)
-        self.gnn_model1 = GraphSAGE(embedding_dim, gcn_layer_num)
+        self.graphsage_model1 = GraphSAGE(embedding_dim, gcn_layer_num)
+        self.gcn_model1 = GCN(embedding_dim, gcn_layer_num)
+        self.gat_model1 = GAT(embedding_dim, gcn_layer_num)
         self.node_embedding1 = nn.Embedding(node_nums[1], embedding_dim)
-        self.gnn_model2 = GraphSAGE(embedding_dim, gcn_layer_num)
-        self.node_embedding2 = nn.Embedding(node_nums[2], embedding_dim)
-        self.gnn_model3 = GraphSAGE(embedding_dim, gcn_layer_num)
-        self.node_embedding3 = nn.Embedding(node_nums[3], embedding_dim)
-        # self.gnn_model4 = GraphSAGE(embedding_dim, gcn_layer_num)
-        # self.node_embedding4 = nn.Embedding(node_nums[3], embedding_dim)
-        # self.gnn_model5 = GraphSAGE(embedding_dim, gcn_layer_num)
-        # self.node_embedding5 = nn.Embedding(node_nums[3], embedding_dim)
-        # self.gnn_model6 = GraphSAGE(embedding_dim, gcn_layer_num)
-        # self.node_embedding6 = nn.Embedding(node_nums[3], embedding_dim)
-        # self.gnn_model7 = GraphSAGE(embedding_dim, gcn_layer_num)
-        # self.node_embedding7 = nn.Embedding(node_nums[3], embedding_dim)
-        # self.gnn_model8 = GraphSAGE(embedding_dim, gcn_layer_num)
-        # self.node_embedding8 = nn.Embedding(node_nums[3], embedding_dim)
-        # self.gnn_model9 = GraphSAGE(embedding_dim, gcn_layer_num)
-        # self.node_embedding9 = nn.Embedding(node_nums[3], embedding_dim)
-        # self.combiner = Combiner(embedding_dim, combiner_layer_num)
+        self.combiner = Combiner(embedding_dim, combiner_layer_num)
         # self.predictor_model = Predictor(embedding_dim)
 
     def padding_embeddings(self, batch_item, embeddings, feature_length):
@@ -169,16 +203,16 @@ class MVCG(nn.Module):
     def forward(self, graphs, batch_candidate, max_feature_length):  # query和candidate是组合策略，是字典形式
         # 生成node embeddings
         embeddings = []
-        embeddings.append(self.gnn_model0(graphs[0], self.node_embedding0(torch.arange(self.node_nums[0]).to(self.device))))
-        embeddings.append(self.gnn_model1(graphs[1], self.node_embedding1(torch.arange(self.node_nums[1]).to(self.device))))
-        embeddings.append(self.gnn_model2(graphs[2], self.node_embedding2(torch.arange(self.node_nums[2]).to(self.device))))
-        embeddings.append(self.gnn_model3(graphs[3], self.node_embedding3(torch.arange(self.node_nums[3]).to(self.device))))
-        # embeddings.append(self.gnn_model4(graphs[4], self.node_embedding4(torch.arange(self.node_nums[4]).to(self.device))))
-        # embeddings.append(self.gnn_model5(graphs[5], self.node_embedding5(torch.arange(self.node_nums[5]).to(self.device))))
-        # embeddings.append(self.gnn_model6(graphs[6], self.node_embedding6(torch.arange(self.node_nums[6]).to(self.device))))
-        # embeddings.append(self.gnn_model7(graphs[7], self.node_embedding7(torch.arange(self.node_nums[7]).to(self.device))))
-        # embeddings.append(self.gnn_model8(graphs[8], self.node_embedding8(torch.arange(self.node_nums[8]).to(self.device))))
-        # embeddings.append(self.gnn_model9(graphs[9], self.node_embedding9(torch.arange(self.node_nums[9]).to(self.device))))
+        # use GraphSAGE to encode nodes
+        embeddings.append(self.graphsage_model0(graphs[0], self.node_embedding0(torch.arange(self.node_nums[0]).to(self.device))))
+        embeddings.append(self.graphsage_model1(graphs[1], self.node_embedding1(torch.arange(self.node_nums[1]).to(self.device))))
+        # use GCN to encode nodes
+        # embeddings.append(self.gcn_model0(graphs[0], self.node_embedding0(torch.arange(self.node_nums[0]).to(self.device))))
+        # embeddings.append(self.gcn_model1(graphs[1], self.node_embedding1(torch.arange(self.node_nums[1]).to(self.device))))
+        # use GAT to encode nodes
+        # embeddings.append(self.gat_model0(graphs[0], self.node_embedding0(torch.arange(self.node_nums[0]).to(self.device))))
+        # embeddings.append(self.gat_model1(graphs[1], self.node_embedding1(torch.arange(self.node_nums[1]).to(self.device))))
+        # use WGAT to encode nodes
 
         # batch_query_strategy = []
         batch_candidate_strategy = []
