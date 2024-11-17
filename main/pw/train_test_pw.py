@@ -11,6 +11,7 @@ from torch import nn
 import scipy.sparse as sp
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
+
 from model.pw.model_pw import MVCG, EarlyStopping, MyDataset, Predictor, TeeOutput
 from utils.create_cm_fv_utils import create_fv_list, create_api_cooccurrence_matrix, create_fv_cooccurrence_matrix
 
@@ -328,7 +329,7 @@ def log_to_file_with_terminal_output(log_dir=None):
     return decorator
 
 
-@log_to_file_with_terminal_output(log_dir="../../log")
+@log_to_file_with_terminal_output(log_dir="../../log/pw")
 def main():
     seed = 123  # 可以是任何数字，保持一致即可
     random.seed(seed)
