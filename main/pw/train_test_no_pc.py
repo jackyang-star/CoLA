@@ -10,15 +10,15 @@ from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
-from model.pw.model_concat import MVCG, EarlyStopping, MyDataset, Predictor, TeeOutput
+from model.pw.model_3graph import MVCG, EarlyStopping, MyDataset, Predictor, TeeOutput
 
 
 # parameters
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-train_test_data_path = "../../dataset/processed/pw/processed_data_1.0.pth"
-graph_data_path = "../../dataset/processed/pw/graphs_1.0.bin"
+train_test_data_path = "../../dataset/processed/pw/processed_data_1.0_no_pc.pth"
+graph_data_path = "../../dataset/processed/pw/graphs_1.0_no_pc.bin"
 longtail_data_path = "../../dataset/processed/pw/longtail_data_threshold_4.npy"
-logdir = "../../log/pw/concat"
+logdir = "../../log/pw/ablation/no_pc"
 # model parameters
 embedding_dim = 64
 combiner_layer_num = 2
@@ -221,7 +221,7 @@ def main():
     mvcg = MVCG(node_nums, strategies, device, embedding_dim, combiner_layer_num, gnn_layer_num).to(device)
     optimizer = torch.optim.Adam(list(mvcg.parameters()) + list(predictor.parameters()), lr=learning_rate)
     scheduler = ReduceLROnPlateau(optimizer, mode=s_mode, factor=s_factor, patience=s_patience, verbose=s_verbose)
-    early_stopping = EarlyStopping(es_patience, es_delta, es_verbose, path='./saved_model/early_stopping_checkpoint.pt')
+    early_stopping = EarlyStopping(es_patience, es_delta, es_verbose, path='./model/early_stopping_checkpoint.pt')
     loss_fn = nn.BCEWithLogitsLoss().to(device)  # 用于二分类的交叉熵损失
     print("Initialize finish!")
 

@@ -41,7 +41,7 @@ def find(api_df, mashup_df, m_features, entropy_threshold, relatedapi, name):
     for feature in m_features:
         # if feature in api_df.columns:
         feature_entropies[feature] = np.mean([ma_entropy[(mashup_id, feature)] for mashup_id, f in ma_entropy.keys() if f == feature])
-        print(f'Feature: {feature}\nEntropy: {feature_entropies[feature]}')
+        # print(f'Feature: {feature}\nEntropy: {feature_entropies[feature]}')
 
     # 判断特征的互补性
     c_features = []
@@ -50,7 +50,7 @@ def find(api_df, mashup_df, m_features, entropy_threshold, relatedapi, name):
                                           entropy_value > threshold]
         c_features.append(entropy_complementary_features)
 
-    return c_features
+    return c_features, feature_entropies
 
 
 

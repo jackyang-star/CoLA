@@ -3,18 +3,14 @@ from itertools import combinations
 
 
 # feature_values列表的提取
-def create_fv_list(api_df, api_list_array, feature):
+def create_fv_list(api_df, api_list_array, feature, name):
     values_list = []
     for api_name in api_list_array:
-        matching_api = api_df[api_df['Name'] == api_name]
+        matching_api = api_df[api_df[name] == api_name]
         fv = matching_api[feature].iloc[0]
         if type(fv) == str:
             fv_list = [value.strip() for value in fv.split(',')]
             values_list.extend(fv_list)
-    # for values in api_df[feature]:
-    #     if type(values) == str:
-    #         temp_list = [value.strip() for value in values.split(',')]  # 把字符串类型数据按list类型保存
-    #         values_list.extend(temp_list)
     values_list = sorted(list(set(values_list)))  # 去重&按字典顺序排序
     values_array = np.array(values_list)
     return values_array
@@ -22,22 +18,24 @@ def create_fv_list(api_df, api_list_array, feature):
 
 # 构建API共现矩阵
 def create_api_cooccurrence_matrix(mashup_df, api_list, feature_name):
+    api_index_dict = {name: i for i, name in enumerate(api_list)}
     # 构建空的共现矩阵
     cooccurrence_matrix = np.zeros((len(api_list), len(api_list)), dtype=np.int32)
     # 填充共现矩阵
     for values in mashup_df[feature_name]:  # 遍历每一个mashup的Related APIs
-        temp_list = [value.strip() for value in values.split(',')]
-        for value_name1, value_name2 in combinations(temp_list, 2):  # 两两组合temp_list中的API，填充共现矩阵
-            if value_name1 in api_list and value_name2 in api_list:  # 不在api_list中的API无法填充共现矩阵
-                x = api_list.index(value_name1)
-                y = api_list.index(value_name2)
-                cooccurrence_matrix[x, y] += 1
-                cooccurrence_matrix[y, x] += 1  # 对称性
+        if values is not None:
+            temp_list = list(set(value.strip() for value in values.split(',') if value.strip()))
+            for value_name1, value_name2 in combinations(temp_list, 2):  # 两两组合temp_list中的API，填充共现矩阵
+                if value_name1 in api_list and value_name2 in api_list:  # 不在api_list中的API无法填充共现矩阵
+                    x = api_index_dict[value_name1]
+                    y = api_index_dict[value_name2]
+                    cooccurrence_matrix[x, y] += 1
+                    cooccurrence_matrix[y, x] += 1  # 对称性
     return cooccurrence_matrix
 
 
 # 由API的共现矩阵构建feature_value的共现矩阵
-def create_fv_cooccurrence_matrix(api_cm_array, api_list_array, api_df, fv_list_array, feature):
+def create_fv_cooccurrence_matrix(api_cm_array, api_list_array, api_df, fv_list_array, feature, name):
     # 构建空的共现矩阵&初始化max_fv_len
     max_fv_len = 0
     cm_array = np.zeros((len(fv_list_array), len(fv_list_array)), dtype=np.int32)
@@ -45,7 +43,7 @@ def create_fv_cooccurrence_matrix(api_cm_array, api_list_array, api_df, fv_list_
     api_name_to_feature_values = {}
     for i in range(len(api_list_array)):
         api_name = api_list_array[i]
-        matching_api = api_df[api_df['Name'] == api_name]
+        matching_api = api_df[api_df[name] == api_name]
         feature_values = matching_api[feature].unique()
         if len(feature_values) > 0:
             feature_values = [fv.strip() for fv in str(feature_values[0]).split(',')]

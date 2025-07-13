@@ -1,66 +1,49 @@
-# Python 缓存文件
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
 *.so
 
-# 虚拟环境
+# Virtual environment
 .env/
 .venv/
 env/
 venv/
 
-# Conda 环境
-*.conda
-*.env
-*.yml
-
-# Jupyter Notebook 检查点
-.ipynb_checkpoints/
-
-# 日志文件
-*.log
-
-# 数据缓存或中间结果
-*.csv
-*.tsv
-*.xls
-*.xlsx
-*.h5
-*.hdf5
-*.npy
-*.npz
-
-# 模型文件
-*.pth
-*.pt
-*.ckpt
-*.pb
-*.onnx
-
-# 图片、视频、音频等大文件（视项目需求而定）
-*.png
-*.jpg
-*.jpeg
-*.gif
-*.mp4
-*.avi
-*.wav
-
-# VSCode 设置
+# VSCode / PyCharm / JetBrains IDE
+.idea/
 .vscode/
 
-# MacOS
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Log and result folders
+log/
+logs/
+outputs/
+runs/
+
+# Dataset and intermediate results
+dataset/
+*.bin
+*.json
+*.csv
+*.tsv
+*.h5
+*.npy
+*.npz
+*.txt
+
+# Model files
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
+# OS-specific files
 .DS_Store
-
-# Windows
 Thumbs.db
-desktop.ini
 
-# 输出目录
+# Others
+*.egg-info/
 build/
 dist/
-*.egg-info/
-
-# 本地配置
-*.local
-.envrc

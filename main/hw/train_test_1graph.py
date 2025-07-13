@@ -10,17 +10,17 @@ from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
-from model.pw.model_concat import MVCG, EarlyStopping, MyDataset, Predictor, TeeOutput
+from model.hw.model_1graph import MVCG, EarlyStopping, MyDataset, Predictor, TeeOutput
 
 
 # parameters
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-train_test_data_path = "../../dataset/processed/pw/processed_data_1.0.pth"
-graph_data_path = "../../dataset/processed/pw/graphs_1.0.bin"
-longtail_data_path = "../../dataset/processed/pw/longtail_data_threshold_4.npy"
-logdir = "../../log/pw/concat"
+train_test_data_path = "../../dataset/processed/hw/processed_data_4.0.pth"
+graph_data_path = "../../dataset/processed/hw/graphs_4.0.bin"
+longtail_data_path = "../../dataset/processed/hw/longtail_data_threshold_4.npy"
+logdir = "../../log/hw/hyperparameter/4.0"
 # model parameters
-embedding_dim = 64
+embedding_dim = 32
 combiner_layer_num = 2
 gnn_layer_num = 2
 # train & test parameters

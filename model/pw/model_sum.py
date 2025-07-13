@@ -25,42 +25,42 @@ class GraphSAGE(nn.Module):
         return h
 
 
-# class GCN(nn.Module):
-#     def __init__(self, embedding_dim, gnn_layer_num):
-#         super(GCN, self).__init__()
-#         self.layers = nn.ModuleList()
-#         for _ in range(gnn_layer_num):
-#             self.layers.append(GraphConv(embedding_dim, embedding_dim))
-#
-#     def forward(self, g, inputs):
-#         # address the 0-in-degree node
-#         g = dgl.add_self_loop(g)
-#
-#         h = inputs
-#         for i, layer in enumerate(self.layers):
-#             h = layer(g, h)
-#             if i < len(self.layers) - 1:
-#                 h = F.relu(h)
-#         return h
+class GCN(nn.Module):
+    def __init__(self, embedding_dim, gnn_layer_num):
+        super(GCN, self).__init__()
+        self.layers = nn.ModuleList()
+        for _ in range(gnn_layer_num):
+            self.layers.append(GraphConv(embedding_dim, embedding_dim))
+
+    def forward(self, g, inputs):
+        # address the 0-in-degree node
+        g = dgl.add_self_loop(g)
+
+        h = inputs
+        for i, layer in enumerate(self.layers):
+            h = layer(g, h)
+            if i < len(self.layers) - 1:
+                h = F.relu(h)
+        return h
 
 
-# class GAT(nn.Module):
-#     def __init__(self, embedding_dim, gnn_layer_num):
-#         super(GAT, self).__init__()
-#         self.layers = nn.ModuleList()
-#
-#         for _ in range(gnn_layer_num):
-#             self.layers.append(GATConv(embedding_dim, embedding_dim, 1))
-#
-#     def forward(self, g, inputs):
-#         g = dgl.add_self_loop(g)
-#         h = inputs
-#
-#         for i, layer in enumerate(self.layers):
-#             h = layer(g, h).flatten(1)
-#             if i < len(self.layers) - 1:
-#                 h = F.relu(h)
-#         return h
+class GAT(nn.Module):
+    def __init__(self, embedding_dim, gnn_layer_num):
+        super(GAT, self).__init__()
+        self.layers = nn.ModuleList()
+
+        for _ in range(gnn_layer_num):
+            self.layers.append(GATConv(embedding_dim, embedding_dim, 1))
+
+    def forward(self, g, inputs):
+        g = dgl.add_self_loop(g)
+        h = inputs
+
+        for i, layer in enumerate(self.layers):
+            h = layer(g, h).flatten(1)
+            if i < len(self.layers) - 1:
+                h = F.relu(h)
+        return h
 
 
 class SelfAttention(nn.Module):
@@ -79,10 +79,6 @@ class SelfAttention(nn.Module):
                             torch.sqrt(torch.tensor(self.emb_dim, dtype=torch.float64)))  # emb_dim比较大的时候除以sqrt(emb_dim)比较好，例如emb_dim=512时
         attention_weights = torch.softmax(attention_scores, dim=-1)
         attention_result = torch.matmul(attention_weights, value)
-
-        self.latest_attention_scores = attention_scores
-        self.latest_attention_weights = attention_weights
-
         return attention_result
 
 
@@ -110,16 +106,16 @@ class Aggregator(nn.Module):
         output0 = embeddings
 
         # attention method
-        for layer in self.layers1:
-            output0 = layer(output0)
+        # for layer in self.layers1:
+        #     output0 = layer(output0)
         # sum method
         output1 = output0.sum(dim=-2)
         # # flatten method
         # flattened_output1 = output0.view(output0.size(0), output0.size(1), -1)
 
         # attention method
-        for layer in self.layers2:
-            output1 = layer(output1)
+        # for layer in self.layers2:
+        #     output1 = layer(output1)
         # sum method
         output2 = output1.sum(dim=-2)
         # flatten method
@@ -154,20 +150,20 @@ class MVCG(nn.Module):
         self.embedding_dim = embedding_dim
 
         self.graphsage_model0 = GraphSAGE(embedding_dim, gnn_layer_num)
-        # self.gcn_model0 = GCN(embedding_dim, gnn_layer_num)
-        # self.gat_model0 = GAT(embedding_dim, gnn_layer_num)
+        self.gcn_model0 = GCN(embedding_dim, gnn_layer_num)
+        self.gat_model0 = GAT(embedding_dim, gnn_layer_num)
         self.node_embedding0 = nn.Embedding(node_nums[0], embedding_dim)
         self.graphsage_model1 = GraphSAGE(embedding_dim, gnn_layer_num)
-        # self.gcn_model1 = GCN(embedding_dim, gnn_layer_num)
-        # self.gat_model1 = GAT(embedding_dim, gnn_layer_num)
+        self.gcn_model1 = GCN(embedding_dim, gnn_layer_num)
+        self.gat_model1 = GAT(embedding_dim, gnn_layer_num)
         self.node_embedding1 = nn.Embedding(node_nums[1], embedding_dim)
         self.graphsage_model2 = GraphSAGE(embedding_dim, gnn_layer_num)
-        # self.gcn_model2 = GCN(embedding_dim, gnn_layer_num)
-        # self.gat_model2 = GAT(embedding_dim, gnn_layer_num)
+        self.gcn_model2 = GCN(embedding_dim, gnn_layer_num)
+        self.gat_model2 = GAT(embedding_dim, gnn_layer_num)
         self.node_embedding2 = nn.Embedding(node_nums[2], embedding_dim)
         self.graphsage_model3 = GraphSAGE(embedding_dim, gnn_layer_num)
-        # self.gcn_model3 = GCN(embedding_dim, gnn_layer_num)
-        # self.gat_model3 = GAT(embedding_dim, gnn_layer_num)
+        self.gcn_model3 = GCN(embedding_dim, gnn_layer_num)
+        self.gat_model3 = GAT(embedding_dim, gnn_layer_num)
         self.node_embedding3 = nn.Embedding(node_nums[3], embedding_dim)
         # self.graphsage_model4 = GraphSAGE(embedding_dim, gcn_layer_num)
         # self.gcn_model4 = GCN(embedding_dim, gcn_layer_num)
@@ -239,6 +235,7 @@ class MVCG(nn.Module):
         # embeddings.append(self.gat_model1(graphs[1], self.node_embedding1(torch.arange(self.node_nums[1]).to(self.device))))
         # embeddings.append(self.gat_model2(graphs[2], self.node_embedding2(torch.arange(self.node_nums[2]).to(self.device))))
         # embeddings.append(self.gat_model3(graphs[3], self.node_embedding3(torch.arange(self.node_nums[3]).to(self.device))))
+        # use WGAT to encode nodes
 
         # batch_query_strategy = []
         batch_candidate_strategy = []

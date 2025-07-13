@@ -10,7 +10,7 @@ from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
-from model.pw.model_concat import MVCG, EarlyStopping, MyDataset, Predictor, TeeOutput
+from model.pw.model_sum import MVCG, EarlyStopping, MyDataset, Predictor, TeeOutput
 
 
 # parameters
@@ -18,7 +18,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 train_test_data_path = "../../dataset/processed/pw/processed_data_1.0.pth"
 graph_data_path = "../../dataset/processed/pw/graphs_1.0.bin"
 longtail_data_path = "../../dataset/processed/pw/longtail_data_threshold_4.npy"
-logdir = "../../log/pw/concat"
+logdir = "../../log/pw/sum"
 # model parameters
 embedding_dim = 64
 combiner_layer_num = 2
