@@ -78,6 +78,10 @@ class SelfAttention(nn.Module):
                             torch.sqrt(torch.tensor(self.emb_dim, dtype=torch.float64)))  # emb_dim比较大的时候除以sqrt(emb_dim)比较好，例如emb_dim=512时
         attention_weights = torch.softmax(attention_scores, dim=-1)
         attention_result = torch.matmul(attention_weights, value)
+
+        self.latest_attention_scores = attention_scores
+        self.latest_attention_weights = attention_weights
+
         return attention_result
 
 

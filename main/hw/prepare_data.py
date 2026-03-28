@@ -117,6 +117,63 @@ def prepare_data(api_cm_array, api_list_array, api_df, features, advanced=False)
     return train_data, test_data, strategies
 
 
+def prepare_data_l(api_cm_array, api_list_array, api_df, features, longtail_data, advanced=False):
+    # train_data, test_data, strategies = [], [], []
+    train_data, test_data_nl, test_data_l, strategies = [], [], [], []
+    fv_dict = {feature: create_fv_list(api_df, api_list_array, feature, name) for feature in features}
+    test_set = set()
+
+    for i in range(api_cm_array.shape[0]):
+        non_zero_columns = np.nonzero(api_cm_array[i])[0].tolist()
+        zero_columns = np.where(api_cm_array[i] == 0)[0].tolist()
+        train_length = int(len(non_zero_columns) * train_test_ratio)
+
+        # 准备测试数据
+        truths = non_zero_columns[train_length:]
+        all_columns = list(range(api_cm_array.shape[1]))
+        candidates = list(set(all_columns) - set(non_zero_columns[:train_length]) - {i})
+        # test_data.append(([i], candidates, truths))
+        candidates_l = set(candidates) & set(longtail_data)
+        candidates_nl = set(candidates) - set(longtail_data)
+        truths_l = set(truths) & set(longtail_data)
+        truths_nl = set(truths) - set(longtail_data)
+        if i in longtail_data:
+            test_data_l.append(([i], candidates_l, truths_l))
+        else:
+            test_data_nl.append(([i], candidates_nl, truths_nl))
+
+        # 准备训练数据
+        for truth in truths:
+            test_set.add((i, truth))
+
+        positives = non_zero_columns[:train_length]
+        negatives = [col for col in zero_columns if col != i and (i, col) not in test_set and (col, i) not in test_set]
+        negatives = random.sample(negatives, min(train_length, len(negatives)))
+
+        for pos in positives:
+            if not advanced or ((i, pos) not in test_set and (pos, i) not in test_set):
+                train_data.append((i, pos, 1))
+        for neg in negatives:
+            train_data.append((i, neg, 0))
+
+        # 保存云API与特征值的对应关系
+        api_name = api_list_array[i]
+        matching_api = api_df[api_df[name] == api_name]
+        item = {}
+        for idx, feature in enumerate(features):
+            matching_feature = matching_api[feature].iloc[0]
+            if not pd.isna(matching_feature):
+                indexes = []
+                for fv in map(str.strip, matching_feature.split(',')):
+                    fv_index = np.where(fv_dict[feature] == fv)[0][0]
+                    indexes.append(fv_index)
+                item[idx] = indexes
+        strategies.append(item)
+
+    # return train_data, test_data, strategies
+    return train_data, test_data_l, test_data_nl, strategies
+
+
 def prepare_longtail(api_list, mashup_df, longtail_threshold):
     pw_api_map = {api: 0 for api in api_list}
     for items in mashup_df[relatedapi]:
@@ -140,7 +197,7 @@ def prepare_longtail(api_list, mashup_df, longtail_threshold):
     return longtail_indices
 
 
-def main(features_key, longtail_threshold=4, ablation=None, advanced=False):
+def main(features_key, longtail_threshold=10, ablation=None, advanced=False):
     # 控制随机性
     random.seed(123)
     # 读数据
@@ -156,9 +213,11 @@ def main(features_key, longtail_threshold=4, ablation=None, advanced=False):
     api_list_array, api_cm_array = create_api_cm(api_df, mashup_df)
 
     # 准备数据
-    train_data, test_data, strategies = prepare_data(api_cm_array, api_list_array, api_df, features, advanced)
-    graphs, max_feature_length = create_graphs(features, api_df, api_list_array, api_cm_array, test_data)
     longtail_data = prepare_longtail(api_list_array, mashup_df, longtail_threshold)
+    train_data, test_data, strategies = prepare_data(api_cm_array, api_list_array, api_df, features, advanced)
+    train_data, test_data_l, test_data_nl, strategies = prepare_data_l(api_cm_array, api_list_array, api_df, features,
+                                                                       longtail_data, advanced)
+    graphs, max_feature_length = create_graphs(features, api_df, api_list_array, api_cm_array, test_data)
 
     # 保存处理后的数据
     # if ablation != None:
@@ -179,7 +238,25 @@ def main(features_key, longtail_threshold=4, ablation=None, advanced=False):
     #     }, os.path.join(save_dir, f"processed_data_{features_key}.pth"))
     #     dgl.save_graphs(os.path.join(save_dir, f"graphs_{features_key}.bin"), graphs)
     #     print(f"Saved processed data and graphs for feature {features_key}")
-    np.save(os.path.join(save_dir, f"longtail_data_threshold_{longtail_threshold}.npy"), longtail_data)
+    # save_path = os.path.abspath(os.path.join(save_dir, f"longtail_data_threshold_{longtail_threshold}.npy"))
+    # np.save(save_path, longtail_data)
+    if ablation != None:
+        pass
+    else:
+        torch.save({
+            "train_data": train_data,
+            "test_data": test_data_l,
+            "strategies": strategies,
+            "max_feature_length": max_feature_length,
+        }, os.path.join(save_dir, f"processed_data_l_{features_key}.pth"))
+        torch.save({
+            "train_data": train_data,
+            "test_data": test_data_nl,
+            "strategies": strategies,
+            "max_feature_length": max_feature_length,
+        }, os.path.join(save_dir, f"processed_data_nl_{features_key}.pth"))
+        # dgl.save_graphs(os.path.join(save_dir, f"graphs_{features_key}.bin"), graphs)
+        print(f"Saved processed data and graphs for feature {features_key}")
 
 if __name__ == "__main__":
-    main('1.0', 2)
+    main('1.0', 10)

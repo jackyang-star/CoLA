@@ -17,7 +17,7 @@ from model.hw.model_1graph import MVCG, EarlyStopping, MyDataset, Predictor, Tee
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 train_test_data_path = "../../dataset/processed/hw/processed_data_1.0_no_name.pth"
 graph_data_path = "../../dataset/processed/hw/graphs_1.0_no_name.bin"
-longtail_data_path = "../../dataset/processed/hw/longtail_data_threshold_4.npy"
+longtail_data_path = "../../dataset/processed/hw/longtail_data_threshold_10.npy"
 logdir = "../../log/hw/ablation/no_name"
 # model parameters
 embedding_dim = 32
@@ -94,11 +94,13 @@ def mrr(pred, truth):
     return reciprocal_rank
 
 
-def ltr(pred, longtail_data):
+def ltr(pred, longtail_data, truth):
     count = 0
     longtail_data_set = set(longtail_data)
+    truth_data_set = set(truth)
+    correct_longtail_data_set = truth_data_set & longtail_data_set
     for i in pred:
-        if i in longtail_data_set:
+        if i in correct_longtail_data_set:
             count += 1
     result = count / len(pred)
     return result
@@ -137,7 +139,7 @@ def test(dataloader, model, predictor, graphs, max_feature_length, longtail_data
                 recall_values[topk].append(recall(topk_candidates, truths_list))
                 ndcg_values[topk].append(ndcg(topk_candidates, truths_list))
                 mrr_values[topk].append(mrr(topk_candidates, truths_list))
-                ltr_values[topk].append(ltr(topk_candidates, longtail_data))
+                ltr_values[topk].append(ltr(topk_candidates, longtail_data, truths_list))
 
         avg_recalls = {k: sum(recall_values[k]) / len(recall_values[k]) for k in topk_list}
         avg_ndcgs = {k: sum(ndcg_values[k]) / len(ndcg_values[k]) for k in topk_list}

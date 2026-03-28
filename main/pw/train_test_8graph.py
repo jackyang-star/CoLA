@@ -1,11 +1,13 @@
-import datetime
 import os
 import sys
-import numpy as np
-import random
 import dgl
-from tqdm import tqdm
 import torch
+import time
+import datetime
+import random
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
@@ -17,7 +19,7 @@ from model.pw.model_8graph import MVCG, EarlyStopping, MyDataset, Predictor, Tee
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 train_test_data_path = "../../dataset/processed/pw/processed_data_0.2.pth"
 graph_data_path = "../../dataset/processed/pw/graphs_0.2.bin"
-longtail_data_path = "../../dataset/processed/pw/longtail_data_threshold_4.npy"
+longtail_data_path = "../../dataset/processed/pw/longtail_data_threshold_10.npy"
 logdir = "../../log/pw/hyperparameter/0.2"
 # model parameters
 embedding_dim = 64
@@ -94,11 +96,13 @@ def mrr(pred, truth):
     return reciprocal_rank
 
 
-def ltr(pred, longtail_data):
+def ltr(pred, longtail_data, truth):
     count = 0
     longtail_data_set = set(longtail_data)
+    truth_data_set = set(truth)
+    correct_longtail_data_set = truth_data_set & longtail_data_set
     for i in pred:
-        if i in longtail_data_set:
+        if i in correct_longtail_data_set:
             count += 1
     result = count / len(pred)
     return result
@@ -137,7 +141,7 @@ def test(dataloader, model, predictor, graphs, max_feature_length, longtail_data
                 recall_values[topk].append(recall(topk_candidates, truths_list))
                 ndcg_values[topk].append(ndcg(topk_candidates, truths_list))
                 mrr_values[topk].append(mrr(topk_candidates, truths_list))
-                ltr_values[topk].append(ltr(topk_candidates, longtail_data))
+                ltr_values[topk].append(ltr(topk_candidates, longtail_data, truths_list))
 
         avg_recalls = {k: sum(recall_values[k]) / len(recall_values[k]) for k in topk_list}
         avg_ndcgs = {k: sum(ndcg_values[k]) / len(ndcg_values[k]) for k in topk_list}
@@ -226,6 +230,8 @@ def main():
     print("Initialize finish!")
 
     # 训练&测试模型
+    training_efficiency_list = []
+    training_loss_list = []
     maxRecall = {k: 0.0 for k in topk_list}
     maxNDCG = {k: 0.0 for k in topk_list}
     maxMRR = {k: 0.0 for k in topk_list}
@@ -235,30 +241,34 @@ def main():
     print(f'batch_size = {batch_size}')
     print(f'learning_rate = {learning_rate}')
     print(f'Running on {device}\n')
+    start_time = time.perf_counter()
     for epoch in range(num_epochs):
         # 训练
         epoch_loss = train(train_dataloader, mvcg, predictor, optimizer, loss_fn, max_feature_length, graphs)
         avg_epoch_loss = np.average(epoch_loss)
-        print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {avg_epoch_loss}')
+        end_time = time.perf_counter()
+        print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {avg_epoch_loss}, Train Time: {end_time - start_time}')
+        training_efficiency_list.append([epoch + 1, end_time - start_time])
+        training_loss_list.append([epoch + 1, avg_epoch_loss])
 
-        # 测试
-        if((epoch + 1) % test_epoch == 0):
-            print(f"Test {epoch + 1}")
-            avg_recalls, avg_ndcgs, avg_mrrs, avg_ltrs = test(test_dataloader, mvcg, predictor, graphs, max_feature_length, longtail_data, topk_list)
-            for topk in topk_list:
-                if avg_recalls[topk] > maxRecall[topk]:
-                    maxRecall[topk] = avg_recalls[topk]
-                if avg_ndcgs[topk] > maxNDCG[topk]:
-                    maxNDCG[topk] = avg_ndcgs[topk]
-                if avg_mrrs[topk] > maxMRR[topk]:
-                    maxMRR[topk] = avg_mrrs[topk]
-                if avg_ltrs[topk] > maxLTR[topk]:
-                    maxLTR[topk] = avg_ltrs[topk]
-                print(f'Epoch [{epoch + 1}/{num_epochs}], Recall@{topk}: {avg_recalls[topk]}')
-                print(f'Epoch [{epoch + 1}/{num_epochs}], NDCG@{topk}: {avg_ndcgs[topk]}')
-                print(f'Epoch [{epoch + 1}/{num_epochs}], MRR@{topk}: {avg_mrrs[topk]}')
-                print(f'Epoch [{epoch + 1}/{num_epochs}], LTR@{topk}: {avg_ltrs[topk]}')
-            print(f"----------------------------------------------------------\n")
+        # # 测试
+        # if((epoch + 1) % test_epoch == 0):
+        #     print(f"Test {epoch + 1}")
+        #     avg_recalls, avg_ndcgs, avg_mrrs, avg_ltrs = test(test_dataloader, mvcg, predictor, graphs, max_feature_length, longtail_data, topk_list)
+        #     for topk in topk_list:
+        #         if avg_recalls[topk] > maxRecall[topk]:
+        #             maxRecall[topk] = avg_recalls[topk]
+        #         if avg_ndcgs[topk] > maxNDCG[topk]:
+        #             maxNDCG[topk] = avg_ndcgs[topk]
+        #         if avg_mrrs[topk] > maxMRR[topk]:
+        #             maxMRR[topk] = avg_mrrs[topk]
+        #         if avg_ltrs[topk] > maxLTR[topk]:
+        #             maxLTR[topk] = avg_ltrs[topk]
+        #         print(f'Epoch [{epoch + 1}/{num_epochs}], Recall@{topk}: {avg_recalls[topk]}')
+        #         print(f'Epoch [{epoch + 1}/{num_epochs}], NDCG@{topk}: {avg_ndcgs[topk]}')
+        #         print(f'Epoch [{epoch + 1}/{num_epochs}], MRR@{topk}: {avg_mrrs[topk]}')
+        #         print(f'Epoch [{epoch + 1}/{num_epochs}], LTR@{topk}: {avg_ltrs[topk]}')
+        #     print(f"----------------------------------------------------------\n")
 
         # 调整学习率
         scheduler.step(avg_epoch_loss)
@@ -269,10 +279,17 @@ def main():
             print("Early stopping")
             break
 
-    print(f'Max Recall: {maxRecall}')
-    print(f'Max NDCG: {maxNDCG}')
-    print(f'Max MRR: {maxMRR}')
-    print(f'Max LTR: {maxLTR}')
+    efficiency_df = pd.DataFrame(training_efficiency_list)
+    loss_df = pd.DataFrame(training_loss_list)
+    efficiency_df.to_excel(
+        f'./train_analysis/graph_num/8/training_efficiency_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx', index=False)
+    loss_df.to_excel(f'./train_analysis/graph_num/8/training_loss_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx',
+                     index=False)
+
+    # print(f'Max Recall: {maxRecall}')
+    # print(f'Max NDCG: {maxNDCG}')
+    # print(f'Max MRR: {maxMRR}')
+    # print(f'Max LTR: {maxLTR}')
 
 
 if __name__ == '__main__':

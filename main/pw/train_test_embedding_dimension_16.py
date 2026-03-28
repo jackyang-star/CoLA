@@ -12,17 +12,18 @@ from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
-from model.pw.model_1graph import MVCG, EarlyStopping, MyDataset, Predictor, TeeOutput
-
+from model.pw.model_pw import MVCG, EarlyStopping, MyDataset, Predictor, TeeOutput
 
 # parameters
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-train_test_data_path = "../../dataset/processed/pw/processed_data_1.4.pth"
-graph_data_path = "../../dataset/processed/pw/graphs_1.4.bin"
+train_test_data_path = "../../dataset/processed/pw/processed_data_1.0.pth"
+graph_data_path = "../../dataset/processed/pw/graphs_1.0.bin"
 longtail_data_path = "../../dataset/processed/pw/longtail_data_threshold_10.npy"
-logdir = "../../log/pw/hyperparameter/1.4"
+logdir = "../../log/pw/hyperparameter/embedding_dimension"
+os.makedirs(logdir, exist_ok=True)
+isSaveModel = False
 # model parameters
-embedding_dim = 64
+embedding_dim = 16
 combiner_layer_num = 2
 gnn_layer_num = 2
 # train & test parameters
@@ -78,6 +79,8 @@ def dcg(r):
     if r.size:
         return np.sum(r / np.log2(np.arange(2, r.size + 2)))
     return 0.0
+
+
 def ndcg(pred, truth):
     ideal = [1] * len(set(truth) & set(pred))
     actual = [1 if item in truth else 0 for item in pred]
@@ -156,7 +159,7 @@ def log_to_file_with_terminal_output(log_dir=None):
         def wrapper(*args, **kwargs):
             # 获取当前时间并生成文件名
             current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            log_filename = f"log_{current_time}_edim{embedding_dim}_alayer{combiner_layer_num}.txt"
+            log_filename = f"log_{current_time}_edim{embedding_dim}_gcnlayer{gnn_layer_num}_alayer{combiner_layer_num}.txt"
 
             # 如果指定了log_dir，则将文件路径设置为log_dir，否则使用当前目录
             if log_dir:
@@ -183,6 +186,7 @@ def log_to_file_with_terminal_output(log_dir=None):
                     print(f"Logs saved to {log_filepath}")
 
         return wrapper
+
     return decorator
 
 
@@ -195,7 +199,6 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)  # 如果使用GPU
     torch.backends.cudnn.deterministic = True
-
 
     # 读入数据
     loaded_data = torch.load(train_test_data_path)
@@ -225,9 +228,13 @@ def main():
     mvcg = MVCG(node_nums, strategies, device, embedding_dim, combiner_layer_num, gnn_layer_num).to(device)
     optimizer = torch.optim.Adam(list(mvcg.parameters()) + list(predictor.parameters()), lr=learning_rate)
     scheduler = ReduceLROnPlateau(optimizer, mode=s_mode, factor=s_factor, patience=s_patience, verbose=s_verbose)
-    early_stopping = EarlyStopping(es_patience, es_delta, es_verbose, path='./model/early_stopping_checkpoint.pt')
+    early_stopping = EarlyStopping(es_patience, es_delta, es_verbose, path='./saved_model/early_stopping_checkpoint.pt')
     loss_fn = nn.BCEWithLogitsLoss().to(device)  # 用于二分类的交叉熵损失
     print("Initialize finish!")
+
+    # # 加载模型
+    # mvcg.load_state_dict(torch.load("./saved_model/best_ndcg@10_model.pth"))
+    # predictor.load_state_dict(torch.load("./saved_model/best_ndcg@10_predictor.pth"))
 
     # 训练&测试模型
     training_efficiency_list = []
@@ -251,24 +258,34 @@ def main():
         training_efficiency_list.append([epoch + 1, end_time - start_time])
         training_loss_list.append([epoch + 1, avg_epoch_loss])
 
-        # # 测试
-        # if((epoch + 1) % test_epoch == 0):
-        #     print(f"Test {epoch + 1}")
-        #     avg_recalls, avg_ndcgs, avg_mrrs, avg_ltrs = test(test_dataloader, mvcg, predictor, graphs, max_feature_length, longtail_data, topk_list)
-        #     for topk in topk_list:
-        #         if avg_recalls[topk] > maxRecall[topk]:
-        #             maxRecall[topk] = avg_recalls[topk]
-        #         if avg_ndcgs[topk] > maxNDCG[topk]:
-        #             maxNDCG[topk] = avg_ndcgs[topk]
-        #         if avg_mrrs[topk] > maxMRR[topk]:
-        #             maxMRR[topk] = avg_mrrs[topk]
-        #         if avg_ltrs[topk] > maxLTR[topk]:
-        #             maxLTR[topk] = avg_ltrs[topk]
-        #         print(f'Epoch [{epoch + 1}/{num_epochs}], Recall@{topk}: {avg_recalls[topk]}')
-        #         print(f'Epoch [{epoch + 1}/{num_epochs}], NDCG@{topk}: {avg_ndcgs[topk]}')
-        #         print(f'Epoch [{epoch + 1}/{num_epochs}], MRR@{topk}: {avg_mrrs[topk]}')
-        #         print(f'Epoch [{epoch + 1}/{num_epochs}], LTR@{topk}: {avg_ltrs[topk]}')
-        #     print(f"----------------------------------------------------------\n")
+        # 测试
+        if ((epoch + 1) % test_epoch == 0):
+            print(f"Test {epoch + 1}")
+            avg_recalls, avg_ndcgs, avg_mrrs, avg_ltrs = test(test_dataloader, mvcg, predictor, graphs,
+                                                              max_feature_length, longtail_data, topk_list)
+            for topk in topk_list:
+                if avg_recalls[topk] > maxRecall[topk]:
+                    maxRecall[topk] = avg_recalls[topk]
+                    if topk == 10 and isSaveModel:
+                        torch.save(mvcg.state_dict(), f'./saved_model/best_recall@10_model.pth')
+                        torch.save(predictor.state_dict(), f'./saved_model/best_recall@10_predictor.pth')
+                if avg_ndcgs[topk] > maxNDCG[topk]:
+                    maxNDCG[topk] = avg_ndcgs[topk]
+                    if topk == 10 and isSaveModel:
+                        torch.save(mvcg.state_dict(), f'./saved_model/best_ndcg@10_model.pth')
+                        torch.save(predictor.state_dict(), f'./saved_model/best_ndcg@10_predictor.pth')
+                if avg_mrrs[topk] > maxMRR[topk]:
+                    maxMRR[topk] = avg_mrrs[topk]
+                    if topk == 10 and isSaveModel:
+                        torch.save(mvcg.state_dict(), f'./saved_model/best_mrr@10_model.pth')
+                        torch.save(predictor.state_dict(), f'./saved_model/best_mrr@10_predictor.pth')
+                if avg_ltrs[topk] > maxLTR[topk]:
+                    maxLTR[topk] = avg_ltrs[topk]
+                print(f'Epoch [{epoch + 1}/{num_epochs}], Recall@{topk}: {avg_recalls[topk]}')
+                print(f'Epoch [{epoch + 1}/{num_epochs}], NDCG@{topk}: {avg_ndcgs[topk]}')
+                print(f'Epoch [{epoch + 1}/{num_epochs}], MRR@{topk}: {avg_mrrs[topk]}')
+                print(f'Epoch [{epoch + 1}/{num_epochs}], LTR@{topk}: {avg_ltrs[topk]}')
+            print(f"----------------------------------------------------------\n")
 
         # 调整学习率
         scheduler.step(avg_epoch_loss)
@@ -279,27 +296,11 @@ def main():
             print("Early stopping")
             break
 
-    efficiency_df = pd.DataFrame(training_efficiency_list)
-    loss_df = pd.DataFrame(training_loss_list)
-    efficiency_df.to_excel(
-        f'./train_analysis/graph_num/1/training_efficiency_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx', index=False)
-    loss_df.to_excel(f'./train_analysis/graph_num/1/training_loss_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx',
-                     index=False)
-
-    # print(f'Max Recall: {maxRecall}')
-    # print(f'Max NDCG: {maxNDCG}')
-    # print(f'Max MRR: {maxMRR}')
-    # print(f'Max LTR: {maxLTR}')
+    print(f'Max Recall: {maxRecall}')
+    print(f'Max NDCG: {maxNDCG}')
+    print(f'Max MRR: {maxMRR}')
+    print(f'Max LTR: {maxLTR}')
 
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
-

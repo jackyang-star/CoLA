@@ -1,23 +1,24 @@
-import datetime
 import os
 import sys
-import numpy as np
-import random
 import dgl
-from tqdm import tqdm
 import torch
+import time
+import datetime
+import random
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
 from torch import nn
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
 
 from model.hw.model_hw import MVCG, EarlyStopping, MyDataset, Predictor, TeeOutput
 
-
 # parameters
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 train_test_data_path = "../../dataset/processed/hw/processed_data_1.0.pth"
 graph_data_path = "../../dataset/processed/hw/graphs_1.0.bin"
-longtail_data_path = "../../dataset/processed/hw/longtail_data_threshold_4.npy"
+longtail_data_path = "../../dataset/processed/hw/longtail_data_threshold_10.npy"
 logdir = "../../log/hw/baseline"
 isSaveModel = False
 # model parameters
@@ -77,6 +78,8 @@ def dcg(r):
     if r.size:
         return np.sum(r / np.log2(np.arange(2, r.size + 2)))
     return 0.0
+
+
 def ndcg(pred, truth):
     ideal = [1] * len(set(truth) & set(pred))
     actual = [1 if item in truth else 0 for item in pred]
@@ -95,11 +98,13 @@ def mrr(pred, truth):
     return reciprocal_rank
 
 
-def ltr(pred, longtail_data):
+def ltr(pred, longtail_data, truth):
     count = 0
     longtail_data_set = set(longtail_data)
+    truth_data_set = set(truth)
+    correct_longtail_data_set = truth_data_set & longtail_data_set
     for i in pred:
-        if i in longtail_data_set:
+        if i in correct_longtail_data_set:
             count += 1
     result = count / len(pred)
     return result
@@ -112,6 +117,8 @@ def test(dataloader, model, predictor, graphs, max_feature_length, longtail_data
         ndcg_values = {k: [] for k in topk_list}
         mrr_values = {k: [] for k in topk_list}
         ltr_values = {k: [] for k in topk_list}
+        recall_values_l = {k: [] for k in topk_list}
+        recall_values_nl = {k: [] for k in topk_list}
 
         # 1. 预先计算所有item的embedding
         item_embeddings = []
@@ -126,8 +133,23 @@ def test(dataloader, model, predictor, graphs, max_feature_length, longtail_data
             query_embedding = item_embeddings[query_id]
             truths_tensor = torch.tensor(truths, dtype=torch.int32).to(device)  # 真标签
             truths_list = truths_tensor.tolist()
+            truths_list_l = list(set(truths_list) & set(longtail_data))
+            truths_list_nl = list(set(truths_list) - set(longtail_data))
             candidates_ids = torch.tensor(candidates, dtype=torch.long).to(device)
             candidates_embeddings = item_embeddings[candidates_ids]
+            candidates_list = candidates_ids.tolist()
+            candidates_l = list(set(candidates_list) & set(longtail_data))
+            candidates_nl = list(set(candidates_list) - set(longtail_data))
+            if candidates_l and truths_list_l:
+                candidates_ids_l = torch.tensor(candidates_l, dtype=torch.long).to(device)
+                candidates_embeddings_l = item_embeddings[candidates_ids_l]
+                scores_l = predictor(query_embedding.repeat(candidates_embeddings_l.size(0), 1),
+                                     candidates_embeddings_l)
+            if candidates_nl and truths_list_nl:
+                candidates_ids_nl = torch.tensor(candidates_nl, dtype=torch.long).to(device)
+                candidates_embeddings_nl = item_embeddings[candidates_ids_nl]
+                scores_nl = predictor(query_embedding.repeat(candidates_embeddings_nl.size(0), 1),
+                                      candidates_embeddings_nl)
 
             scores = predictor(query_embedding.repeat(candidates_embeddings.size(0), 1), candidates_embeddings)
 
@@ -138,14 +160,24 @@ def test(dataloader, model, predictor, graphs, max_feature_length, longtail_data
                 recall_values[topk].append(recall(topk_candidates, truths_list))
                 ndcg_values[topk].append(ndcg(topk_candidates, truths_list))
                 mrr_values[topk].append(mrr(topk_candidates, truths_list))
-                ltr_values[topk].append(ltr(topk_candidates, longtail_data))
+                ltr_values[topk].append(ltr(topk_candidates, longtail_data, truths_list))
+                if truths_list_l and candidates_l:
+                    topk_scores_l, topk_indices_l = torch.topk(scores_l, k=min(topk, len(scores_l)), largest=True)
+                    topk_candidates_l = candidates_ids_l[topk_indices_l].tolist()
+                    recall_values_l[topk].append(recall(topk_candidates_l, truths_list_l))
+                if truths_list_nl and candidates_nl:
+                    topk_scores_nl, topk_indices_nl = torch.topk(scores_nl, k=min(topk, len(scores_nl)), largest=True)
+                    topk_candidates_nl = candidates_ids_nl[topk_indices_nl].tolist()
+                    recall_values_nl[topk].append(recall(topk_candidates_nl, truths_list_nl))
 
         avg_recalls = {k: sum(recall_values[k]) / len(recall_values[k]) for k in topk_list}
         avg_ndcgs = {k: sum(ndcg_values[k]) / len(ndcg_values[k]) for k in topk_list}
         avg_mrrs = {k: sum(mrr_values[k]) / len(mrr_values[k]) for k in topk_list}
         avg_ltrs = {k: sum(ltr_values[k]) / len(ltr_values[k]) for k in topk_list}
+        avg_recalls_l = {k: sum(recall_values_l[k]) / len(recall_values_l[k]) for k in topk_list}
+        avg_recalls_nl = {k: sum(recall_values_nl[k]) / len(recall_values_nl[k]) for k in topk_list}
 
-    return avg_recalls, avg_ndcgs, avg_mrrs, avg_ltrs
+    return avg_recalls, avg_ndcgs, avg_mrrs, avg_ltrs, avg_recalls_l, avg_recalls_nl
 
 
 def log_to_file_with_terminal_output(log_dir=None):
@@ -180,10 +212,11 @@ def log_to_file_with_terminal_output(log_dir=None):
                     print(f"Logs saved to {log_filepath}")
 
         return wrapper
+
     return decorator
 
 
-# @log_to_file_with_terminal_output(log_dir=logdir)
+@log_to_file_with_terminal_output(log_dir=logdir)
 def main():
     seed = 123  # 可以是任何数字，保持一致即可
     random.seed(seed)
@@ -192,7 +225,6 @@ def main():
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)  # 如果使用GPU
     torch.backends.cudnn.deterministic = True
-
 
     # 读入数据
     loaded_data = torch.load(train_test_data_path)
@@ -226,26 +258,41 @@ def main():
     loss_fn = nn.BCEWithLogitsLoss().to(device)  # 用于二分类的交叉熵损失
     print("Initialize finish!")
 
+    # # 加载模型
+    # mvcg.load_state_dict(torch.load("./saved_model/best_ndcg@10_model.pth"))
+    # predictor.load_state_dict(torch.load("./saved_model/best_ndcg@10_predictor.pth"))
+
     # 训练&测试模型
+    training_efficiency_list = []
+    training_loss_list = []
     maxRecall = {k: 0.0 for k in topk_list}
     maxNDCG = {k: 0.0 for k in topk_list}
     maxMRR = {k: 0.0 for k in topk_list}
     maxLTR = {k: 0.0 for k in topk_list}
+    maxRecall_l = {k: 0.0 for k in topk_list}
+    maxRecall_nl = {k: 0.0 for k in topk_list}
     print(f'embedding_dim = {embedding_dim}')
     print(f'combiner_layer_num = {combiner_layer_num}')
     print(f'batch_size = {batch_size}')
     print(f'learning_rate = {learning_rate}')
     print(f'Running on {device}\n')
+    start_time = time.perf_counter()
     for epoch in range(num_epochs):
         # 训练
         epoch_loss = train(train_dataloader, mvcg, predictor, optimizer, loss_fn, max_feature_length, graphs)
         avg_epoch_loss = np.average(epoch_loss)
-        print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {avg_epoch_loss}')
+        end_time = time.perf_counter()
+        print(f'Epoch [{epoch + 1}/{num_epochs}], Train Loss: {avg_epoch_loss}, Train Time: {end_time - start_time}')
+        training_efficiency_list.append([epoch + 1, end_time - start_time])
+        training_loss_list.append([epoch + 1, avg_epoch_loss])
 
         # 测试
-        if((epoch + 1) % test_epoch == 0):
+        if ((epoch + 1) % test_epoch == 0):
             print(f"Test {epoch + 1}")
-            avg_recalls, avg_ndcgs, avg_mrrs, avg_ltrs = test(test_dataloader, mvcg, predictor, graphs, max_feature_length, longtail_data, topk_list)
+            avg_recalls, avg_ndcgs, avg_mrrs, avg_ltrs, avg_recalls_l, avg_recalls_nl = test(test_dataloader, mvcg,
+                                                                                             predictor, graphs,
+                                                                                             max_feature_length,
+                                                                                             longtail_data, topk_list)
             for topk in topk_list:
                 if avg_recalls[topk] > maxRecall[topk]:
                     maxRecall[topk] = avg_recalls[topk]
@@ -264,12 +311,17 @@ def main():
                         torch.save(predictor.state_dict(), f'./saved_model/best_mrr@10_predictor.pth')
                 if avg_ltrs[topk] > maxLTR[topk]:
                     maxLTR[topk] = avg_ltrs[topk]
+                if avg_recalls_l[topk] > maxRecall_l[topk]:
+                    maxRecall_l[topk] = avg_recalls_l[topk]
+                if avg_recalls_nl[topk] > maxRecall_nl[topk]:
+                    maxRecall_nl[topk] = avg_recalls_nl[topk]
                 print(f'Epoch [{epoch + 1}/{num_epochs}], Recall@{topk}: {avg_recalls[topk]}')
                 print(f'Epoch [{epoch + 1}/{num_epochs}], NDCG@{topk}: {avg_ndcgs[topk]}')
                 print(f'Epoch [{epoch + 1}/{num_epochs}], MRR@{topk}: {avg_mrrs[topk]}')
                 print(f'Epoch [{epoch + 1}/{num_epochs}], LTR@{topk}: {avg_ltrs[topk]}')
+                print(f'Epoch [{epoch + 1}/{num_epochs}], Recall_l@{topk}: {avg_recalls_l[topk]}')
+                print(f'Epoch [{epoch + 1}/{num_epochs}], Recall_nl@{topk}: {avg_recalls_nl[topk]}')
             print(f"----------------------------------------------------------\n")
-
 
         # 调整学习率
         scheduler.step(avg_epoch_loss)
@@ -280,20 +332,22 @@ def main():
             print("Early stopping")
             break
 
+    # efficiency_df = pd.DataFrame(training_efficiency_list)
+    # loss_df = pd.DataFrame(training_loss_list)
+    # efficiency_df.to_excel(
+    #     f'./train_analysis/graph_num/2/training_efficiency_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx',
+    #     index=False)
+    # loss_df.to_excel(
+    #     f'./train_analysis/graph_num/2/training_loss_{datetime.datetime.now().strftime("%Y%m%d_%H%M%S")}.xlsx',
+    #     index=False)
+
     print(f'Max Recall: {maxRecall}')
     print(f'Max NDCG: {maxNDCG}')
     print(f'Max MRR: {maxMRR}')
     print(f"Max LTR: {maxLTR}")
+    print(f'Max Recall_l: {maxRecall_l}')
+    print(f'Max Recall_nl: {maxRecall_nl}')
 
 
 if __name__ == '__main__':
     main()
-
-
-
-
-
-
-
-
-
