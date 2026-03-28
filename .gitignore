@@ -21,6 +21,10 @@ log/
 logs/
 outputs/
 runs/
+/main/pw/train_analysis/
+/main/pw/saved_model/
+/main/hw/saved_model/
+/main/hw/train_analysis/
 
 # Dataset and intermediate results
 dataset/
