@@ -1,4 +1,4 @@
-# ACGRL
+# CoLA
 
 This is the official PyTorch implementation for the [paper]():
 
